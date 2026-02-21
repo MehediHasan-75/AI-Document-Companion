@@ -1,0 +1,4 @@
+* text=auto
+*.py linguist-language=Python
+README.md export-ignore
+LICENSE export-ignore

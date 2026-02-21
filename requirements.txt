@@ -2,6 +2,6 @@
 unstructured[all-docs]
 fastapi
 uvicorn
-
+python-multipart
 # System dependencies (install separately on macOS):
 # brew install libmagic poppler tesseract

@@ -1,0 +1,7 @@
+# Python package requirements
+unstructured[all-docs]
+fastapi
+uvicorn
+
+# System dependencies (install separately on macOS):
+# brew install libmagic poppler tesseract

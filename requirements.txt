@@ -3,6 +3,12 @@ unstructured[all-docs]
 fastapi
 uvicorn
 python-multipart
+
+# Database
+sqlalchemy>=2.0.0
+psycopg2-binary  # PostgreSQL driver
+aiosqlite  # Async SQLite for development
+
 # System dependencies (install separately on macOS):
 # brew install libmagic poppler tesseract
 
@@ -10,3 +16,13 @@ python-multipart
 #ollama pull deepseek-r1:8b
 #ollama run deepseek-r1:8b
 # ollama pull llava
+unstructured[all-docs]
+pillow
+lxml
+chromadb
+tiktoken
+langchain
+langchain-community
+langchain-openai
+langchain-groq
+python-dotenv

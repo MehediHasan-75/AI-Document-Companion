@@ -29,7 +29,7 @@ from typing import Any, Dict, List, Optional, TypedDict
 from fastapi import HTTPException, status
 
 from src.services.vector_service import get_vectorstore, get_docstore
-from src.services.retrival_service import get_multi_vector_retriever, retrieve_with_sources
+from src.services.retrieval_service import get_multi_vector_retriever, retrieve_with_sources
 from src.services.llm_service import get_rag_chain
 
 

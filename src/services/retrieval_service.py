@@ -21,7 +21,7 @@ Integration Points:
     - MQ_INTEGRATION: Async retrieval for large result sets
 
 Example:
-    >>> from src.services.retrival_service import get_multi_vector_retriever
+    >>> from src.services.retrieval_service import get_multi_vector_retriever
     >>> retriever, id_key = get_multi_vector_retriever(vectorstore)
     >>> results = retrieve_with_sources(retriever, docstore, "What is AI?", id_key)
 """

@@ -33,7 +33,7 @@ from src.services.unstructured_service import partition_document
 from src.services.chunk_service import separate_elements, get_images_base64
 from src.services.llm_service import get_text_table_summarizer, get_image_summarizer
 from src.services.vector_service import get_vectorstore, get_docstore
-from src.services.retrival_service import (
+from src.services.retrieval_service import (
     get_multi_vector_retriever,
     add_documents_to_retriever,
 )

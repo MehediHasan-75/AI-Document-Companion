@@ -14,7 +14,7 @@ Available Services:
     - query_service: RAG query handling
     - ingestion_service: Document ingestion pipeline
     - vector_service: Vector store management
-    - retrival_service: Multi-vector retrieval
+    - retrieval_service: Multi-vector retrieval
     - llm_service: LLM chain construction
     - chunk_service: Document chunk processing
     - embedding_service: Embedding model factory
@@ -38,7 +38,7 @@ from src.services.query_service import query_service, QueryService
 # Import key functions from other services
 from src.services.ingestion_service import ingest_document_pipeline
 from src.services.vector_service import get_vectorstore, get_docstore, SimpleDocStore
-from src.services.retrival_service import (
+from src.services.retrieval_service import (
     get_multi_vector_retriever,
     add_documents_to_retriever,
     retrieve_with_sources,

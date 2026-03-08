@@ -17,7 +17,7 @@ Integration Points:
 
 Status Flow:
     uploaded -> processing -> processed
-                          \-> failed
+                          \\-> failed
 
 Example:
     >>> from src.services.process_service import process_service
@@ -36,7 +36,7 @@ from typing import Any, Dict, Optional, TYPE_CHECKING
 from fastapi import HTTPException, status
 
 from src.services.file_service import file_service
-from src.rag.ingestion_service import ingest_document_pipeline
+from src.services.ingestion_service import ingest_document_pipeline
 
 if TYPE_CHECKING:
     from fastapi import BackgroundTasks

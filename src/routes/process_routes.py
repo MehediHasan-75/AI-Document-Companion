@@ -1,7 +1,6 @@
 """
 Processing Routes Module
 ------------------------
-
 Defines endpoints for triggering document processing and querying processing
 status for previously uploaded files.
 """

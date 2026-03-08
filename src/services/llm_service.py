@@ -51,13 +51,14 @@ from langchain_ollama import ChatOllama
 # Module Configuration
 # =============================================================================
 
+from src.config import settings
+
 logger = logging.getLogger(__name__)
 
-# LLM Configuration Constants
-# NOTE: Consider moving to environment variables or config file for production
-OLLAMA_BASE_URL: str = "http://localhost:11434"
-TEXT_MODEL: str = "deepseek-r1:8b"
-VISION_MODEL: str = "llava"
+# LLM Configuration (from centralized settings)
+OLLAMA_BASE_URL: str = settings.OLLAMA_HOST
+TEXT_MODEL: str = settings.OLLAMA_MODEL
+VISION_MODEL: str = "llava"  # Vision model not in settings yet
 SUMMARIZATION_TEMPERATURE: float = 0.5
 VISION_TEMPERATURE: float = 0.7
 

@@ -47,13 +47,14 @@ from langchain_huggingface import HuggingFaceEmbeddings
 # Module Configuration
 # =============================================================================
 
+from src.config import settings
+
 logger = logging.getLogger(__name__)
 
-# Storage Configuration Constants
-# NOTE: Consider moving to environment variables or settings module for production
-DEFAULT_CHROMA_PERSIST_DIR: str = "./chroma_db"
+# Storage Configuration (from centralized settings)
+DEFAULT_CHROMA_PERSIST_DIR: str = "./chroma_db"  # Override with VECTOR_DB_PATH if needed
 DEFAULT_DOCSTORE_PATH: str = "./docstore.json"
-EMBEDDING_MODEL_NAME: str = "all-MiniLM-L6-v2"
+EMBEDDING_MODEL_NAME: str = settings.EMBEDDING_MODEL.split("/")[-1]  # Extract model name
 COLLECTION_NAME: str = "document_summaries"
 
 # Singleton instances for persistence across requests

@@ -1,10 +1,23 @@
-# routes/query_route.py
+"""
+Query routes for RAG question answering.
+"""
+
 from fastapi import APIRouter
-# from services.query_service import query_rag
+from pydantic import BaseModel
 
-router = APIRouter()
+from src.controllers.query_controller import query_controller
 
-@router.get("/ask")
-async def ask(question: str):
-    answer = await query_rag(question)
-    return {"answer": answer}
+
+router = APIRouter(prefix="/query", tags=["Query"])
+
+
+class QueryRequest(BaseModel):
+    question: str
+
+
+@router.post("/ask", summary="Ask a question over ingested documents")
+async def ask(payload: QueryRequest):
+    """
+    Ask a question over the currently ingested documents.
+    """
+    return query_controller.ask(payload.question)

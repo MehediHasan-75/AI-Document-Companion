@@ -48,6 +48,12 @@ class Settings(BaseSettings):
     CHUNK_OVERLAP: int = 50
     MAX_UPLOAD_SIZE: int = 50
     UPLOAD_DIR: str = "./uploads"
+
+    # RAG / Vector store & file handling (new, preferred fields)
+    OPENAI_API_KEY: str | None = None
+    VECTOR_DB_PATH: str = "./vector_db"
+    UPLOAD_DIRECTORY: str | None = None
+    MAX_FILE_SIZE: int | None = None
     
     API_WORKERS: int = 1
     MAX_WORKERS: int = 1

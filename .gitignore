@@ -6,4 +6,5 @@ __pycache__/
 uploads/
 public/
 chat_test.md
-chat_test.py
+chat_test.pychroma_db/
+docstore.json

@@ -5,3 +5,8 @@ uvicorn
 python-multipart
 # System dependencies (install separately on macOS):
 # brew install libmagic poppler tesseract
+
+#curl -fsSL https://ollama.com/install.sh | sh
+#ollama pull deepseek-r1:8b
+#ollama run deepseek-r1:8b
+# ollama pull llava

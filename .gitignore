@@ -5,3 +5,5 @@ __pycache__/
 .venv/
 uploads/
 public/
+chat_test.md
+chat_test.py

@@ -34,9 +34,15 @@ Dependencies:
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any, List, Optional
 
 from unstructured.partition.pdf import partition_pdf
+from unstructured.partition.docx import partition_docx
+from unstructured.partition.pptx import partition_pptx
+from unstructured.partition.text import partition_text
+from unstructured.partition.html import partition_html
+from unstructured.partition.md import partition_md
 
 
 # =============================================================================
@@ -162,40 +168,80 @@ def partition_document(
         For Docker deployments, use the unstructured base image.
     """
     logger.info("Partitioning document: %s (strategy=%s)", file_path, strategy)
-    
+
     # REDIS_INTEGRATION: Check cache first
     # file_hash = compute_file_hash(file_path)
     # cached = get_cached_partition(file_hash)
     # if cached:
     #     logger.debug("Using cached partition result")
     #     return cached
-    
-    # Configure image extraction
+
+    suffix = Path(file_path).suffix.lower()
+
+    # Configure image extraction (PDF only)
     image_config = {}
     if extract_images:
         image_config = {
             "extract_image_block_types": DEFAULT_IMAGE_TYPES,
             "extract_image_block_to_payload": True,
         }
-    
-    # Partition the PDF document
-    chunks = partition_pdf(
-        filename=file_path,
-        infer_table_structure=True,
-        strategy=strategy,
-        chunking_strategy="by_title",
-        max_characters=max_characters,
-        combine_text_under_n_chars=combine_text_under_n_chars,
-        new_after_n_chars=new_after_n_chars,
-        **image_config
-    )
-    
+
+    # -------------------------------------------------------------------------
+    # File Type Routing
+    # -------------------------------------------------------------------------
+
+    if suffix == ".pdf":
+
+        chunks = partition_pdf(
+            filename=file_path,
+            infer_table_structure=True,
+            strategy=strategy,
+            chunking_strategy="by_title",
+            max_characters=max_characters,
+            combine_text_under_n_chars=combine_text_under_n_chars,
+            new_after_n_chars=new_after_n_chars,
+            **image_config
+        )
+
+    elif suffix == ".docx":
+
+        chunks = partition_docx(
+            filename=file_path
+        )
+
+    elif suffix == ".pptx":
+
+        chunks = partition_pptx(
+            filename=file_path
+        )
+
+    elif suffix == ".txt":
+
+        chunks = partition_text(
+            filename=file_path
+        )
+
+    elif suffix in [".html", ".htm"]:
+
+        chunks = partition_html(
+            filename=file_path
+        )
+
+    elif suffix == ".md":
+
+        chunks = partition_md(
+            filename=file_path
+        )
+
+    else:
+        raise ValueError(f"Unsupported document type: {suffix}")
+
     logger.info(
         "Partitioning complete: %d elements extracted from %s",
         len(chunks), file_path
     )
-    
+
     # REDIS_INTEGRATION: Cache the result
     # cache_partition(file_hash, chunks)
-    
+
     return chunks

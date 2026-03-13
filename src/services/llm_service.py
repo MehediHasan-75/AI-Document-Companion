@@ -36,22 +36,25 @@ import logging
 from base64 import b64decode
 from typing import Any, Dict, List, Tuple, Union
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage, BaseMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableLambda, RunnablePassthrough
+
 from langchain_ollama import ChatOllama
+
+# Consolidated imports at the top (PEP 8 standard)
+from src.config import settings
+from src.services.retrieval_service import retrieve_with_sources, get_multi_vector_retriever
+from src.services.vector_service import get_vectorstore, get_docstore
 
 # Commented imports preserved for future provider flexibility
 # from langchain_groq import ChatGroq
 # from langchain_openai import ChatOpenAI
 
-
 # =============================================================================
 # Module Configuration
 # =============================================================================
-
-from src.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +122,78 @@ Context: {context}
 Question: {question}
 """
 
+# =============================================================================
+# LLM Factories (Refactored for DRY Principle)
+# =============================================================================
+
+def _get_text_llm() -> ChatOllama:
+    """Centralized factory for the text/table LLM."""
+    return ChatOllama(
+        model=TEXT_MODEL,
+        base_url=OLLAMA_BASE_URL,
+        temperature=SUMMARIZATION_TEMPERATURE
+    )
+
+def _get_vision_llm() -> ChatOllama:
+    """Centralized factory for the vision LLM."""
+    return ChatOllama(
+        model=VISION_MODEL,
+        base_url=OLLAMA_BASE_URL,
+        temperature=VISION_TEMPERATURE
+    )
+
+
+# =============================================================================
+# Utility: Retrieve Original Content by ID and Query LLM
+# =============================================================================
+
+def query_llm_with_retrieved_context(query: str, top_k: int = 3) -> str:
+    """
+    Retrieve top-k relevant original contents using vector search and use them as context for the LLM.
+    Args:
+        query: The user question to answer.
+        top_k: Number of top relevant chunks to retrieve.
+    Returns:
+        The LLM's answer as a string.
+    """
+    vectorstore = get_vectorstore()
+    docstore = get_docstore()
+    retriever, id_key = get_multi_vector_retriever(vectorstore, search_k=top_k)
+    sources = retrieve_with_sources(retriever, docstore, query, id_key)
+    
+    # Concatenate all original contents for context
+    context = "\n\n".join([src["original"] for src in sources if src["original"]])
+    if not context:
+        return "No relevant content found for the query."
+        
+    prompt = f"""
+    Answer the question based only on the following context.\nContext: {context}\nQuestion: {query}\n"""
+    
+    return _get_text_llm().invoke([HumanMessage(content=prompt)]).content
+
+
+def query_llm_with_original_content(doc_id: str, question: str) -> str:
+    """
+    Retrieve the original document content by doc_id and use it as context for an LLM query.
+    Args:
+        doc_id: The document or chunk ID to fetch from the docstore.
+        question: The user question to answer using the original content as context.
+    Returns:
+        The LLM's answer as a string.
+    """
+    docstore = get_docstore()
+    context = docstore.get(doc_id)
+    if not context:
+        return "No original content found for the provided ID."
+        
+    prompt = f"""
+    Answer the question based only on the following context.
+    Context: {context}
+    Question: {question}
+    """
+    
+    return _get_text_llm().invoke([HumanMessage(content=prompt)]).content
+
 
 # =============================================================================
 # Text and Table Summarization
@@ -152,14 +227,8 @@ def get_text_table_summarizer() -> Any:
     
     prompt = ChatPromptTemplate.from_template(TEXT_TABLE_SUMMARIZATION_PROMPT)
     
-    model = ChatOllama(
-        model=TEXT_MODEL,
-        base_url=OLLAMA_BASE_URL,
-        temperature=SUMMARIZATION_TEMPERATURE
-    )
-    
     # Chain: input -> prompt formatting -> LLM -> string output
-    summarize_chain = {"element": lambda x: x} | prompt | model | StrOutputParser()
+    summarize_chain = {"element": lambda x: x} | prompt | _get_text_llm() | StrOutputParser()
     
     return summarize_chain
 
@@ -213,7 +282,7 @@ def get_image_summarizer() -> Any:
     
     chain = (
         prompt
-        | ChatOllama(model=VISION_MODEL, base_url=OLLAMA_BASE_URL, temperature=VISION_TEMPERATURE)
+        | _get_vision_llm()
         | StrOutputParser()
     )
     
@@ -262,7 +331,7 @@ def parse_docs(docs: List[Any]) -> Dict[str, List[Any]]:
     return {"images": b64_images, "texts": text_docs}
 
 
-def build_prompt(kwargs: Dict[str, Any]) -> ChatPromptTemplate:
+def build_prompt(kwargs: Dict[str, Any]) -> List[BaseMessage]:
     """
     Build a multi-modal prompt from context documents and user question.
     
@@ -275,7 +344,7 @@ def build_prompt(kwargs: Dict[str, Any]) -> ChatPromptTemplate:
             - question: The user's question string
     
     Returns:
-        ChatPromptTemplate ready for LLM invocation with text and image content.
+        A list of BaseMessage ready for LLM invocation with text and image content.
     
     Note:
         Images are embedded as data URIs in the prompt for vision-capable models.
@@ -284,12 +353,10 @@ def build_prompt(kwargs: Dict[str, Any]) -> ChatPromptTemplate:
     docs_by_type = kwargs["context"]
     user_question = kwargs["question"]
 
-    # Concatenate all text content from Document objects
-    context_text = ""
-    if len(docs_by_type["texts"]) > 0:
-        for text_element in docs_by_type["texts"]:
-            # Use page_content here as Document objects are passed
-            context_text += text_element.page_content
+    # Concatenate all text content from Document objects safely
+    context_text = "".join(
+        [doc.page_content for doc in docs_by_type.get("texts", []) if hasattr(doc, 'page_content')]
+    )
 
     # Construct prompt with context (including images)
     prompt_template = f"""
@@ -301,20 +368,16 @@ def build_prompt(kwargs: Dict[str, Any]) -> ChatPromptTemplate:
     prompt_content: List[Dict[str, Any]] = [{"type": "text", "text": prompt_template}]
 
     # Append base64 images as image_url content
-    if len(docs_by_type["images"]) > 0:
-        for image in docs_by_type["images"]:
-            prompt_content.append(
-                {
-                    "type": "image_url",
-                    "image_url": {"url": f"data:image/jpeg;base64,{image}"},
-                }
-            )
+    for image in docs_by_type.get("images", []):
+        prompt_content.append(
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{image}"},
+            }
+        )
 
-    return ChatPromptTemplate.from_messages(
-        [
-            HumanMessage(content=prompt_content),
-        ]
-    )
+    # Return as an actual message object, not a prompt template
+    return [HumanMessage(content=prompt_content)]
 
 
 # =============================================================================
@@ -355,25 +418,25 @@ def get_rag_chain(retriever: Any) -> Tuple[Any, Any]:
     """
     logger.debug("Creating RAG chain with retriever")
     
+    # Common input processing step
+    setup_and_retrieval = {
+        "context": retriever | RunnableLambda(parse_docs),
+        "question": RunnablePassthrough(),
+    }
+    
     # Standard RAG chain: retriever -> parse -> prompt -> LLM -> output
     chain = (
-        {
-            "context": retriever | RunnableLambda(parse_docs),
-            "question": RunnablePassthrough(),
-        }
+        setup_and_retrieval
         | RunnableLambda(build_prompt)
-        | ChatOllama(model=TEXT_MODEL, base_url=OLLAMA_BASE_URL)
+        | _get_text_llm()
         | StrOutputParser()
     )
 
     # RAG chain with sources: preserves context alongside response
-    chain_with_sources = {
-        "context": retriever | RunnableLambda(parse_docs),
-        "question": RunnablePassthrough(),
-    } | RunnablePassthrough().assign(
+    chain_with_sources = setup_and_retrieval | RunnablePassthrough().assign(
         response=(
             RunnableLambda(build_prompt)
-            | ChatOllama(model=TEXT_MODEL, base_url=OLLAMA_BASE_URL)
+            | _get_text_llm()
             | StrOutputParser()
         )
     )

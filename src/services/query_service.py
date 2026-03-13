@@ -164,67 +164,6 @@ class QueryService:
         except Exception as exc:
             # Log but continue if count check fails (non-critical)
             logger.debug("Vector store count check skipped: %s", str(exc))
-
-    def ask_question(self, question: str) -> str:
-        """
-        Run a RAG query over stored document summaries.
-        
-        Executes a Retrieval-Augmented Generation query using the configured
-        vector store and LLM chain to generate an answer based on ingested
-        document content.
-        
-        Args:
-            question: The natural language question to answer.
-                Should be clear and specific for best results.
-        
-        Returns:
-            The generated answer string from the LLM based on retrieved context.
-        
-        Raises:
-            HTTPException: 503 if no documents are available for querying.
-        
-        Integration Points:
-            - REDIS_INTEGRATION: Check cache before query, cache response after
-            - WEBSOCKET_INTEGRATION: Emit query:started and query:completed events
-            - MQ_INTEGRATION: Optionally enqueue for async processing
-        
-        Example:
-            >>> service = QueryService()
-            >>> answer = service.ask_question("What are the main features?")
-            >>> print(answer)
-        """
-        logger.info("Processing question: %s", question[:100])
-        
-        # REDIS_INTEGRATION: Check cache first
-        # cache_key = hashlib.md5(question.encode()).hexdigest()
-        # cached = get_cached_response(cache_key)
-        # if cached:
-        #     logger.debug("Cache hit for query: %s", cache_key)
-        #     return cached
-        
-        # WEBSOCKET_INTEGRATION: Emit query started event
-        # await emit_query_started(query_id, question)
-        
-        # Validate vector store has documents
-        self._validate_vectorstore()
-        
-        # Initialize retriever and RAG chain
-        vectorstore = get_vectorstore()
-        retriever, id_key = get_multi_vector_retriever(vectorstore)
-        chain, _ = get_rag_chain(retriever)
-        
-        # Execute the RAG chain to generate answer
-        answer = chain.invoke(question)
-        
-        logger.info("Question answered successfully")
-        
-        # REDIS_INTEGRATION: Cache the response
-        # cache_response(cache_key, answer, ttl=3600)
-        
-        # WEBSOCKET_INTEGRATION: Emit query completed event
-        # await emit_query_completed(query_id, answer)
-        
-        return answer
     
     def ask_with_sources(self, question: str) -> QueryResponse:
         """

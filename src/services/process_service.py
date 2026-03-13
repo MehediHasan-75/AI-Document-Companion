@@ -333,59 +333,6 @@ class ProcessService:
             "message": "Processing started. Poll /files/status/{file_id} for updates."
         }
 
-    # -------------------------------------------------------------------------
-    def process_file(self, file_id: str) -> Dict[str, Any]:
-        """
-        Run the ingestion pipeline synchronously (blocking).
-        
-        Processes the document and blocks until completion. Use this
-        for testing or when immediate results are required.
-        
-        Args:
-            file_id: Unique identifier of the file to process.
-        
-        Returns:
-            Dictionary containing the final processing status.
-        
-        Raises:
-            HTTPException: 404 if file does not exist.
-            HTTPException: 500 if processing fails.
-        
-        Note:
-            For production use, prefer process_file_async() to avoid
-            blocking the request thread during long-running processing.
-        
-        Example:
-            >>> result = process_service.process_file("file-123")
-            >>> print(result["status"])  # "processed"
-        """
-        file_path = file_service.get_file_path(file_id)
-        if file_path is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"File with id '{file_id}' not found",
-            )
-
-        self._write_status(file_id, FileProcessingStatus.PROCESSING)
-        
-        logger.info("Synchronous processing started for %s", file_id)
-
-        try:
-            ingest_document_pipeline(str(file_path))
-        except Exception as exc:
-            logger.exception("Processing failed for %s", file_id)
-            self._write_status(file_id, FileProcessingStatus.FAILED, str(exc))
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Unexpected error during document processing",
-            ) from exc
-
-        self._write_status(file_id, FileProcessingStatus.PROCESSED)
-        logger.info("Synchronous processing completed for %s", file_id)
-        
-        return self.get_status(file_id)
-
-
 # =============================================================================
 # Module-Level Service Instance
 # =============================================================================

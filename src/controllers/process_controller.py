@@ -95,39 +95,6 @@ class ProcessController:
     # Processing Operations
     # -------------------------------------------------------------------------
 
-    def process_file(self, file_id: str) -> Dict[str, Any]:
-        """
-        Trigger synchronous processing for a file.
-        
-        Initiates the RAG ingestion pipeline and blocks until completion.
-        Use this for testing or when immediate results are required.
-        
-        Args:
-            file_id: Unique identifier of the file to process.
-        
-        Returns:
-            Dictionary containing the final processing status:
-                - file_id: The file identifier
-                - status: "processed" or "failed"
-                - error: Error message (if failed)
-        
-        Raises:
-            HTTPException: 404 if file does not exist.
-            HTTPException: 500 if processing fails.
-        
-        Note:
-            For production use, prefer process_file_async() to avoid
-            blocking the request thread.
-        
-        Example:
-            >>> result = process_controller.process_file("file-123")
-            >>> print(result["status"])  # "processed"
-        """
-        logger.info("Starting synchronous processing for file: %s", file_id)
-        return self.service.process_file(file_id)
-
-    # -------------------------------------------------------------------------
-
     def process_file_async(
         self,
         file_id: str,

@@ -370,7 +370,7 @@ def retrieve_with_sources(
         # WEBSOCKET_INTEGRATION: Stream each source
         # await emit_source_found(result, idx, len(matched_summaries))
     
-    # REDIS_INTEGRATION: Cache results
+    # REDIS_INTEGRATION: Cache results.
     # cache_retrieval(cache_key, results)
     
     logger.info("Retrieved %d sources for query", len(results))

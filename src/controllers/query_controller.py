@@ -150,7 +150,7 @@ class QueryController:
         # if cached:
         #     return {"answer": cached}
         
-        answer = self.service.ask_question(question)
+        answer = self.service.ask_with_sources(question)
         
         logger.info("Query answered successfully")
         

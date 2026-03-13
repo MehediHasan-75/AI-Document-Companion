@@ -2,12 +2,12 @@
 Unstructured Document Partitioning Service.
 
 This module provides a wrapper around the Unstructured library for parsing
-PDF documents into structured elements (text, tables, images).
+various documents (PDF, DOCX, HTML, etc.) into structured elements.
 
 Architecture:
-    - Uses Unstructured's hi_res strategy for accurate extraction
-    - Extracts images as base64 payloads for vision model processing
-    - Applies title-based chunking for semantic coherence
+    - Uses Unstructured's auto-partitioning for file type routing
+    - Extracts images as base64 payloads for vision model processing (PDFs)
+    - Applies title-based chunking universally for semantic coherence
     - Infers table structure for HTML representation
 
 Configuration:
@@ -15,34 +15,18 @@ Configuration:
     - MAX_CHARACTERS: Maximum characters per chunk
     - COMBINE_TEXT_UNDER_N_CHARS: Merge small text blocks
     - NEW_AFTER_N_CHARS: Force new chunk after N characters
-
-Integration Points:
-    - MQ_INTEGRATION: Queue documents for background partitioning
-    - WEBSOCKET_INTEGRATION: Stream partition progress
-    - REDIS_INTEGRATION: Cache partition results by file hash
-
-Example:
-    >>> from src.services.unstructured_service import partition_document
-    >>> chunks = partition_document("/path/to/document.pdf")
-    >>> print(f"Extracted {len(chunks)} elements")
-
-Dependencies:
-    - unstructured[pdf]: pip install "unstructured[pdf]"
-    - For hi_res: requires poppler, tesseract, and other system deps
 """
 
 from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import List
 
-from unstructured.partition.pdf import partition_pdf
-from unstructured.partition.docx import partition_docx
-from unstructured.partition.pptx import partition_pptx
-from unstructured.partition.text import partition_text
-from unstructured.partition.html import partition_html
-from unstructured.partition.md import partition_md
+# Use the auto partitioner and unified chunking utilities
+from unstructured.partition.auto import partition
+from unstructured.chunking.title import chunk_by_title
+from unstructured.documents.elements import Element
 
 
 # =============================================================================
@@ -51,54 +35,11 @@ from unstructured.partition.md import partition_md
 
 logger = logging.getLogger(__name__)
 
-# Partitioning Strategy
-# "hi_res": Uses OCR and layout detection for accuracy (slower)
-# "fast": Quick extraction without OCR (less accurate)
-# "auto": Automatically selects based on document complexity
 DEFAULT_PARTITION_STRATEGY: str = "hi_res"
-
-# Chunking Configuration
-# These values control how text is split and merged into coherent chunks
 DEFAULT_MAX_CHARACTERS: int = 10000
 DEFAULT_COMBINE_UNDER_N_CHARS: int = 2000
 DEFAULT_NEW_AFTER_N_CHARS: int = 6000
-
-# Image Extraction Types
 DEFAULT_IMAGE_TYPES: List[str] = ["Image"]
-
-
-# =============================================================================
-# Integration Placeholders (Future-Ready)
-# =============================================================================
-
-# REDIS_INTEGRATION: Cache partition results
-# Example:
-#   def get_cached_partition(file_hash: str) -> Optional[List[Any]]:
-#       """Retrieve cached partition results from Redis."""
-#       cached = redis_client.get(f"partition:{file_hash}")
-#       return pickle.loads(cached) if cached else None
-#
-#   def cache_partition(file_hash: str, chunks: List[Any]) -> None:
-#       """Cache partition results with long TTL."""
-#       redis_client.setex(f"partition:{file_hash}", 604800, pickle.dumps(chunks))
-
-# WEBSOCKET_INTEGRATION: Stream partition progress
-# Example:
-#   async def emit_partition_progress(page: int, total_pages: int) -> None:
-#       """Emit progress during PDF partitioning."""
-#       await event_emitter.emit("partition:progress", {
-#           "page": page, "total": total_pages
-#       })
-
-# MQ_INTEGRATION: Queue documents for partitioning
-# Example:
-#   async def enqueue_partition(file_path: str) -> str:
-#       """Queue document for background partitioning."""
-#       job_id = str(uuid.uuid4())
-#       await message_queue.publish("partition_queue", {
-#           "job_id": job_id, "file_path": file_path
-#       })
-#       return job_id
 
 
 # =============================================================================
@@ -112,62 +53,32 @@ def partition_document(
     combine_text_under_n_chars: int = DEFAULT_COMBINE_UNDER_N_CHARS,
     new_after_n_chars: int = DEFAULT_NEW_AFTER_N_CHARS,
     extract_images: bool = True
-) -> List[Any]:
+) -> List[Element]:
     """
-    Partition a PDF document into structured elements using Unstructured.
+    Partition a document into structured elements using Unstructured.
     
-    Extracts text, tables, and images from a PDF document, organizing
+    Extracts text, tables, and images from a document, organizing
     content into semantically coherent chunks for downstream processing.
     
     Args:
-        file_path: Absolute path to the PDF file to partition.
-        strategy: Partitioning strategy to use. Options:
-            - "hi_res": High accuracy with OCR (slower)
-            - "fast": Quick extraction without OCR
-            - "auto": Automatic selection based on content
-            Defaults to "hi_res".
+        file_path: Absolute path to the file to partition.
+        strategy: Partitioning strategy to use ("hi_res", "fast", "auto").
         max_characters: Maximum characters per chunk before splitting.
-            Defaults to 10000.
-        combine_text_under_n_chars: Merge text blocks smaller than this
-            into the previous chunk. Defaults to 2000.
-        new_after_n_chars: Force a new chunk after reaching this count,
-            even without a natural break. Defaults to 6000.
-        extract_images: Whether to extract images as base64 payloads.
-            Defaults to True.
+        combine_text_under_n_chars: Merge text blocks smaller than this.
+        new_after_n_chars: Force a new chunk after reaching this count.
+        extract_images: Whether to extract images as base64 payloads (PDFs).
     
     Returns:
-        List of Unstructured Element objects. Types include:
-            - CompositeElement: Merged text content
-            - Table: Tabular data with HTML representation
-            - Title, NarrativeText, etc.: Individual elements
+        List of Unstructured Element objects.
     
     Raises:
         FileNotFoundError: If the specified file does not exist.
-        ValueError: If the file is not a valid PDF.
-        Exception: Propagates Unstructured library errors.
-    
-    Integration Points:
-        - REDIS_INTEGRATION: Check cache before partitioning
-        - WEBSOCKET_INTEGRATION: Emit progress during extraction
-        - MQ_INTEGRATION: Called from async job processor
-    
-    Example:
-        >>> chunks = partition_document("/data/report.pdf")
-        >>> for chunk in chunks:
-        ...     print(f"Type: {type(chunk).__name__}, Length: {len(str(chunk))}")
-        
-        >>> # Fast extraction for large documents
-        >>> chunks = partition_document("/data/large.pdf", strategy="fast")
-    
-    Note:
-        The "hi_res" strategy requires system dependencies:
-        - poppler-utils (pdftotext, pdftoppm)
-        - tesseract-ocr (for OCR)
-        - libmagic (file type detection)
-        
-        For Docker deployments, use the unstructured base image.
     """
     logger.info("Partitioning document: %s (strategy=%s)", file_path, strategy)
+
+    path_obj = Path(file_path)
+    if not path_obj.is_file():
+        raise FileNotFoundError(f"Document not found at: {file_path}")
 
     # REDIS_INTEGRATION: Check cache first
     # file_hash = compute_file_hash(file_path)
@@ -176,68 +87,32 @@ def partition_document(
     #     logger.debug("Using cached partition result")
     #     return cached
 
-    suffix = Path(file_path).suffix.lower()
-
-    # Configure image extraction (PDF only)
-    image_config = {}
+    # Configure image extraction (Auto-partition routes these to PDF processing)
+    extract_kwargs = {}
     if extract_images:
-        image_config = {
-            "extract_image_block_types": DEFAULT_IMAGE_TYPES,
-            "extract_image_block_to_payload": True,
+        extract_kwargs = {
+            "pdf_extract_image_block_types": DEFAULT_IMAGE_TYPES,
+            "pdf_extract_image_block_to_payload": True,
         }
 
-    # -------------------------------------------------------------------------
-    # File Type Routing
-    # -------------------------------------------------------------------------
+    # 1. Partition the document (Automatically detects file type)
+    elements = partition(
+        filename=file_path,
+        strategy=strategy,
+        infer_table_structure=True,
+        **extract_kwargs
+    )
 
-    if suffix == ".pdf":
-
-        chunks = partition_pdf(
-            filename=file_path,
-            infer_table_structure=True,
-            strategy=strategy,
-            chunking_strategy="by_title",
-            max_characters=max_characters,
-            combine_text_under_n_chars=combine_text_under_n_chars,
-            new_after_n_chars=new_after_n_chars,
-            **image_config
-        )
-
-    elif suffix == ".docx":
-
-        chunks = partition_docx(
-            filename=file_path
-        )
-
-    elif suffix == ".pptx":
-
-        chunks = partition_pptx(
-            filename=file_path
-        )
-
-    elif suffix == ".txt":
-
-        chunks = partition_text(
-            filename=file_path
-        )
-
-    elif suffix in [".html", ".htm"]:
-
-        chunks = partition_html(
-            filename=file_path
-        )
-
-    elif suffix == ".md":
-
-        chunks = partition_md(
-            filename=file_path
-        )
-
-    else:
-        raise ValueError(f"Unsupported document type: {suffix}")
+    # 2. Apply chunking universally to the extracted elements
+    chunks = chunk_by_title(
+        elements,
+        max_characters=max_characters,
+        combine_text_under_n_chars=combine_text_under_n_chars,
+        new_after_n_chars=new_after_n_chars
+    )
 
     logger.info(
-        "Partitioning complete: %d elements extracted from %s",
+        "Partitioning complete: %d chunks generated from %s",
         len(chunks), file_path
     )
 

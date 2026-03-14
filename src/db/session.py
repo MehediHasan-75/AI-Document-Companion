@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Generator
-
 from sqlalchemy import create_engine, event
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from src.db.base import Base
@@ -74,15 +72,6 @@ def create_db_engine(database_url: str | None = None):
 
 engine = create_db_engine()
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-
-def get_db() -> Generator[Session, None, None]:
-    """FastAPI dependency that provides a request-scoped database session."""
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 
 def init_db() -> None:

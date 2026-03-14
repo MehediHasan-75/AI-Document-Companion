@@ -1,23 +1,13 @@
 """Conversation routes for chat with memory."""
 
-from typing import Optional
-
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from src.controllers.conversation_controller import conversation_controller
-from src.db.session import get_db
+from src.dependencies.db import get_db
+from src.schemas.conversation import ChatRequest, CreateConversationRequest
 
 router = APIRouter(prefix="/conversations", tags=["Conversations"])
-
-
-class CreateConversationRequest(BaseModel):
-    title: Optional[str] = None
-
-
-class ChatRequest(BaseModel):
-    question: str
 
 
 @router.post("", summary="Create a new conversation")

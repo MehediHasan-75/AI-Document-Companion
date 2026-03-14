@@ -62,5 +62,7 @@ class Settings(BaseSettings):
     # Auth tokens
     HUGGING_FACE_HUB_TOKEN: str | None = None
 
-
-env = Settings()
+    @property
+    def embedding_model_name(self) -> str:
+        """Short model name extracted from the full model path."""
+        return self.EMBEDDING_MODEL.split("/")[-1]

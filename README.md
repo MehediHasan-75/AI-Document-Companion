@@ -1,493 +1,405 @@
+<div align="center">
+
 # AI Document Companion
 
-A **RAG-powered document intelligence system** that lets you upload documents and have natural conversations with their content. Built with **FastAPI**, **LangChain**, and **local LLMs via Ollama**.
+**A production-grade multimodal RAG pipeline. Upload PDFs, Word documents, spreadsheets, and presentations. Ask questions. Get answers grounded in sources — with persistent, user-scoped conversation memory.**
+
+[![Python](https://img.shields.io/badge/Python-3.12-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![LangChain](https://img.shields.io/badge/LangChain-LCEL-1C3C3C?style=flat-square&logo=chainlink&logoColor=white)](https://python.langchain.com)
+[![ChromaDB](https://img.shields.io/badge/ChromaDB-Vector_Store-FF6B35?style=flat-square)](https://www.trychroma.com)
+[![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.0-D71F00?style=flat-square)](https://sqlalchemy.org)
+[![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
+
+</div>
 
 ---
 
-## What It Does
+## What This Is
 
-Upload a PDF, and this system will:
-1. **Parse** the document into text, tables, and images using intelligent partitioning
-2. **Summarize** each element with AI (Deepseek for text/tables, Llava for images)
-3. **Store** summary embeddings in a vector database for semantic search
-4. **Answer questions** about your documents using a multi-modal RAG chain
+Most RAG demos chunk plain text and call it multimodal. This pipeline handles the hard cases: PDFs with embedded tables, scanned diagrams, Word documents with mixed content. It separates text, structured tables (as HTML), and images at the element level using ML-based layout detection — then summarises each type with the appropriate model before indexing.
 
-Think of it as your personal document assistant that actually understands what's in your files.
+The architecture is intentionally layered. Every design decision has a concrete reason documented below.
 
 ---
 
-## Architecture Overview
+## System Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────────────┐
-│                          FastAPI Server                               │
-├──────────────────────────────────────────────────────────────────────┤
-│  Routes: /files/upload  →  /files/process/{id}  →  /query/ask        │
-├──────────────────────────────────────────────────────────────────────┤
-│                       Ingestion Pipeline                              │
-│  ┌───────────────┐   ┌────────────────────┐   ┌──────────────────┐   │
-│  │ Unstructured  │──▶│ LangChain Chains   │──▶│ ChromaDB (vector)│   │
-│  │  (Partition)  │   │ (Summarize via LLM)│   │ DocStore (JSON)  │   │
-│  └───────────────┘   └────────────────────┘   └──────────────────┘   │
-├──────────────────────────────────────────────────────────────────────┤
-│                       RAG Query Engine                                │
-│  Question ──▶ VectorStoreRetriever ──▶ RunnableChain ──▶ LLM Answer  │
-│                   (LangChain)            (LCEL)          (Ollama)     │
-└──────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                         CLIENT REQUEST                          │
+└─────────────────────┬───────────────────────────────────────────┘
+                      │
+                      ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      FastAPI  (src/main.py)                     │
+│  ┌─────────────┐  ┌─────────────┐  ┌────────────────────────┐  │
+│  │    CORS     │  │    GZip     │  │  Request Logger (http) │  │
+│  │ Middleware  │  │ Middleware  │  │  method · path · ms    │  │
+│  └─────────────┘  └─────────────┘  └────────────────────────┘  │
+└─────────────────────┬───────────────────────────────────────────┘
+                      │
+          ┌───────────┼───────────────┐
+          ▼           ▼               ▼
+   ┌─────────────┐ ┌────────┐ ┌─────────────────┐
+   │ auth_routes │ │ files  │ │  conversations  │
+   │  /register  │ │/upload │ │  /ask  /list    │
+   │  /login /me │ │/process│ └────────┬────────┘
+   └──────┬──────┘ └───┬────┘          │
+          │            │               │
+          ▼            ▼               ▼
+   ┌─────────────────────────────────────────────┐
+   │               CONTROLLERS                   │
+   │   auth · file · process · query · convo     │
+   └───────────┬─────────────────────────────────┘
+               │
+   ┌───────────┼──────────────────────────────────┐
+   ▼           ▼              ▼                   ▼
+┌──────┐  ┌─────────┐  ┌───────────┐  ┌──────────────────┐
+│ Auth │  │ File /  │  │  RAG      │  │  Conversation    │
+│ Svc  │  │ Process │  │  Pipeline │  │  Service         │
+│      │  │ Service │  │           │  │  (memory store)  │
+└──┬───┘  └────┬────┘  └─────┬─────┘  └────────┬─────────┘
+   │           │             │                  │
+   ▼           ▼             ▼                  ▼
+┌──────────────────┐   ┌───────────────┐  ┌────────────────┐
+│  PostgreSQL /    │   │ Chroma (vecs) │  │  SQLite        │
+│  SQLite          │   │ + DocStore    │  │  (messages /   │
+│  users · convos  │   │   (SQLite)    │  │  conversations)│
+│  messages·chunks │   └───────────────┘  └────────────────┘
+└──────────────────┘
+
+
+                    INGESTION PIPELINE
+┌────────────────────────────────────────────────────────────┐
+│  File Upload                                               │
+│       │                                                    │
+│       ▼                                                    │
+│  unstructured.partition() ── hi_res ML layout detection    │
+│       │                                                    │
+│       ▼                                                    │
+│  chunk_by_title()  ◄── structural chunking (not char-split)│
+│       │                                                    │
+│  ┌────┴──────────────────┐                                 │
+│  ▼           ▼           ▼                                 │
+│ texts      tables      images                              │
+│            (HTML via   (base64 from                        │
+│           text_as_html) orig_elements)                     │
+│  └────┬──────────────────┘                                 │
+│       ▼                                                    │
+│  LLM Summarization  (batch, max_concurrency=3)             │
+│       │                                                    │
+│  ┌────┴──────────────────┐                                 │
+│  ▼                       ▼                                 │
+│ Summaries ──────► Chroma (all-MiniLM-L6-v2, 384-dim)      │
+│ Originals ──────► SQLite DocStore  (WAL mode)              │
+└────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Tech Stack
+## Technical Deep Dive
 
-| Layer | Technology | Purpose |
-|-------|-----------|---------|
-| **API** | FastAPI | REST endpoints, async background processing |
-| **Document Parsing** | Unstructured | Extract text, tables, images from PDFs |
-| **LLM Inference** | Ollama (Deepseek-R1, Llava) | Local summarization and RAG responses |
-| **Embeddings** | LangChain HuggingFaceEmbeddings | Sentence embeddings for semantic search |
-| **Vector Store** | LangChain Chroma integration | Persistent similarity search |
-| **RAG Orchestration** | LangChain LCEL (Runnables) | Chain composition, prompt management |
-| **Database** | SQLAlchemy 2.0 | Document metadata, conversations, messages |
+<details>
+<summary><strong>Why Unstructured for Multimodal Parsing</strong></summary>
 
----
+<br>
 
-## How LangChain Powers This Project
+The core problem with PDF parsing is that a file's byte stream encodes visual layout, not semantic structure. A naive approach — read text with `pdfminer`, split on newlines — loses table cell boundaries, ignores embedded images entirely, and merges headers with body text.
 
-This project uses **LangChain extensively** across six major packages to build a production-grade RAG pipeline. Nothing is done manually — every LLM interaction, embedding, retrieval, and chain composition goes through LangChain's framework.
-
-### LangChain Packages Used
-
-```
-langchain-core        →  LCEL runnables, prompts, output parsers, base document model
-langchain-ollama      →  ChatOllama LLM wrapper for local model inference
-langchain-chroma      →  Chroma vector store integration
-langchain-huggingface →  HuggingFaceEmbeddings for sentence-transformers
-langchain-openai      →  OpenAI embeddings (available as alternative)
-langchain-community   →  Community integrations
-```
-
----
-
-### 1. LLM Integration — `ChatOllama` (langchain-ollama)
-
-> **File:** `src/services/llm_service.py`, `src/services/rag_chain.py`
-
-Instead of calling Ollama's REST API manually, the project uses LangChain's `ChatOllama` wrapper. This gives us a standardized `BaseChatModel` interface that plugs directly into LangChain chains.
+`unstructured` solves this with `partition(strategy="hi_res")` which runs an ML-based document layout model to classify page regions before extracting them. The pipeline receives back typed `Element` objects rather than a flat string:
 
 ```python
-from langchain_ollama import ChatOllama
-
-# Text/table summarization LLM
-def _get_text_llm() -> ChatOllama:
-    return ChatOllama(
-        model=settings.OLLAMA_MODEL,       # "deepseek-r1:8b"
-        base_url=settings.OLLAMA_HOST,     # "http://localhost:11434"
-        temperature=SUMMARIZATION_TEMPERATURE,
-    )
-
-# Vision LLM for image understanding
-def _get_vision_llm() -> ChatOllama:
-    return ChatOllama(
-        model=VISION_MODEL,                # "llava"
-        base_url=settings.OLLAMA_HOST,
-        temperature=VISION_TEMPERATURE,
-    )
-```
-
-**Why LangChain here?** `ChatOllama` implements the `BaseChatModel` interface, so we can swap it with `ChatOpenAI`, `ChatGroq`, or any other provider without changing any downstream chain logic. The model is interchangeable — the chains stay the same.
-
----
-
-### 2. Prompt Engineering — `ChatPromptTemplate` (langchain-core)
-
-> **File:** `src/services/llm_service.py`, `src/config/prompts.py`
-
-All prompts are built using LangChain's `ChatPromptTemplate`, not raw string formatting. This ensures proper message structure, variable injection, and compatibility with any LLM.
-
-```python
-from langchain_core.prompts import ChatPromptTemplate
-
-# Text/table summarization chain using ChatPromptTemplate
-prompt = ChatPromptTemplate.from_template("""
-You are an assistant tasked with summarizing tables and text.
-Give a concise summary of the table or text.
-Table or text chunk: {element}
-""")
-
-# Multi-modal image prompt with structured message format
-messages = [
-    ("user", [
-        {"type": "text", "text": IMAGE_SUMMARIZATION_PROMPT},
-        {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,{image}"}},
-    ])
-]
-prompt = ChatPromptTemplate.from_messages(messages)
-```
-
-**Why LangChain here?** `ChatPromptTemplate` handles variable substitution (`{element}`, `{image}`), supports multi-modal content blocks (text + images), and formats messages correctly for the chat model API. No manual string interpolation or message dict construction needed.
-
----
-
-### 3. Chain Composition — LCEL Runnables (langchain-core)
-
-> **File:** `src/services/llm_service.py`, `src/services/rag_chain.py`
-
-The entire pipeline is composed using **LangChain Expression Language (LCEL)** — LangChain's declarative way of building chains with the `|` (pipe) operator.
-
-#### Summarization Chain (LCEL)
-
-```python
-from langchain_core.output_parsers import StrOutputParser
-
-# Compose: input → prompt → LLM → parse output to string
-summarizer = {"element": lambda x: x} | prompt | _get_text_llm() | StrOutputParser()
-
-# Batch process multiple chunks with concurrency control
-text_summaries = summarizer.batch(
-    [str(t) for t in texts],
-    {"max_concurrency": 3}    # LangChain handles parallel execution
+# src/services/unstructured_service.py
+elements = partition(
+    filename=file_path,
+    strategy="hi_res",             # ML layout detection, not rule-based
+    infer_table_structure=True,    # returns table.metadata.text_as_html
+    pdf_extract_image_block_types=["Image"],
+    pdf_extract_image_block_to_payload=True,  # base64 in metadata
 )
 ```
 
-#### RAG Chain (LCEL)
+The chunk separation step (`src/services/chunk_service.py`) then routes by element type:
 
 ```python
-from langchain_core.runnables import RunnableLambda, RunnablePassthrough
+def separate_elements(chunks):
+    for chunk in chunks:
+        if "Table" in str(type(chunk)):
+            tables.append(chunk)        # → table.metadata.text_as_html
+        if "CompositeElement" in str(type(chunk)):
+            texts.append(chunk)         # → plain text
 
-def get_rag_chain(retriever):
-    # Step 1: Set up parallel retrieval + question passthrough
-    setup_and_retrieval = {
-        "context": retriever | RunnableLambda(parse_docs),  # retrieve → split by type
-        "question": RunnablePassthrough(),                   # pass question through
-    }
-
-    # Step 2: Compose the full chain
-    chain = (
-        setup_and_retrieval
-        | RunnableLambda(build_prompt)    # build multi-modal prompt
-        | _get_text_llm()                # send to LLM
-        | StrOutputParser()              # extract string response
-    )
-
-    # Step 3: Chain variant that also returns source documents
-    chain_with_sources = setup_and_retrieval | RunnablePassthrough().assign(
-        response=(
-            RunnableLambda(build_prompt) | _get_text_llm() | StrOutputParser()
-        )
-    )
-
-    return chain, chain_with_sources
+def get_images_base64(chunks):
+    for chunk in chunks:
+        for el in chunk.metadata.orig_elements:
+            if "Image" in str(type(el)):
+                images_b64.append(el.metadata.image_base64)
 ```
 
-**Key LCEL components used:**
+Each content type then hits the appropriate summariser: text and HTML tables go to `deepseek-r1:8b`; images go to `llava` via a vision prompt with base64 image_url content.
 
-| Component | What It Does | Where Used |
-|-----------|-------------|------------|
-| `RunnablePassthrough()` | Passes input through unchanged | Forwarding the user question alongside retrieval |
-| `RunnableLambda(fn)` | Wraps a Python function as a chain step | `parse_docs` (split images/text), `build_prompt` (create multi-modal prompt) |
-| `StrOutputParser()` | Extracts string content from LLM response | End of every chain |
-| `RunnablePassthrough().assign()` | Passes input through while adding computed fields | `chain_with_sources` — adds `response` field to retrieval output |
-| `\|` pipe operator | Connects chain steps sequentially | Entire pipeline composition |
-| `.batch()` | Runs chain over multiple inputs with concurrency | Summarizing all text chunks, tables, and images in parallel |
+**Single `partition()` call handles:** PDF, DOCX, PPTX, XLSX, CSV, TXT, MD, HTML, JSON — no format-specific code paths.
 
-**Why LangChain here?** LCEL lets us compose complex pipelines declaratively. Each step (retrieve → parse → prompt → LLM → parse output) is a composable unit. We get `.batch()` with concurrency control, `.invoke()` for single calls, and `.stream()` for streaming — all for free. Without LangChain, we'd need to manually orchestrate async calls, handle batching, and wire up each step.
+</details>
 
----
+<details>
+<summary><strong>Multi-Vector Retrieval Architecture</strong></summary>
 
-### 4. Embeddings — `HuggingFaceEmbeddings` (langchain-huggingface)
+<br>
 
-> **File:** `src/services/vector_service.py`
+Standard RAG embeds raw document chunks and retrieves by cosine similarity. This creates a recall problem: a user question phrased naturally often has low cosine similarity to a dense technical paragraph even when that paragraph contains the answer.
 
-Document embeddings are generated using LangChain's `HuggingFaceEmbeddings` wrapper around `sentence-transformers`.
+This pipeline uses a **multi-vector strategy**: what gets embedded in Chroma is an LLM-generated summary. What gets stored in the docstore is the original.
+
+```
+Ingestion:
+  raw_chunk → LLM → summary → embed → Chroma  (metadata: {doc_id, type})
+  raw_chunk ──────────────────────── DocStore  (keyed by doc_id)
+
+Query:
+  question → embed → Chroma similarity search → [summary docs with doc_ids]
+                                                        │
+                                           docstore.get(doc_id) → original
+                                                        │
+                                             injected into LLM prompt
+```
+
+The LLM's answer is grounded in the **original content**, retrieved via the **summary's embedding space** — which is semantically closer to how a user phrases a natural question.
+
+The `chain_with_sources` LCEL chain carries `context` through the pipeline so the sources returned to the API are the exact documents the LLM used — not a separate retrieval call:
 
 ```python
-from langchain_huggingface import HuggingFaceEmbeddings
-
-embeddings = HuggingFaceEmbeddings(
-    model_name=settings.embedding_model_name  # "all-MiniLM-L6-v2"
+# src/services/rag_chain.py
+chain_with_sources = setup_and_retrieval | RunnablePassthrough().assign(
+    response=(RunnableLambda(build_prompt) | llm | StrOutputParser())
 )
+# result["context"]["texts"]  == exactly what the LLM received
+# result["response"]          == the answer
 ```
 
-**Why LangChain here?** `HuggingFaceEmbeddings` implements LangChain's `Embeddings` interface. This means the same embedding object plugs directly into `Chroma`, retrievers, and any other LangChain component that needs embeddings. Swapping to OpenAI embeddings is a one-line change — replace `HuggingFaceEmbeddings` with `OpenAIEmbeddings`.
+Image documents are routed by `doc.metadata["type"] == "image"` (set at ingestion) — not by attempting `b64decode` on content strings, which silently succeeds on many plain-text values.
 
----
+</details>
 
-### 5. Vector Store — `Chroma` (langchain-chroma)
+<details>
+<summary><strong>Chunking Strategy and Token Efficiency Trade-offs</strong></summary>
 
-> **File:** `src/services/vector_service.py`, `src/services/retrieval_service.py`
+<br>
 
-ChromaDB is accessed entirely through LangChain's `Chroma` wrapper, not the raw `chromadb` client.
+**`chunk_by_title` vs `RecursiveCharacterTextSplitter`**
+
+`RecursiveCharacterTextSplitter` operates on character count. It is document-format-agnostic, which is a liability for structured documents — it will cut across a table row mid-cell or split a bullet list mid-item to satisfy a token budget.
+
+`chunk_by_title` uses the heading hierarchy extracted by Unstructured's layout model. Each chunk contains a complete logical unit and never splits across a structural boundary.
+
+**The constants are deliberate:**
 
 ```python
-from langchain_chroma import Chroma
-
-vectorstore = Chroma(
-    collection_name="document_summaries",
-    embedding_function=embeddings,          # HuggingFaceEmbeddings instance
-    persist_directory="./chroma_db",
-)
-
-# Add documents with metadata
-vectorstore.add_documents([
-    Document(
-        page_content="Summary of the text chunk...",
-        metadata={"doc_id": "uuid-here", "type": "text"}
-    )
-])
-
-# Create a retriever (LangChain abstraction)
-retriever = vectorstore.as_retriever(
-    search_type="similarity",
-    search_kwargs={"k": 5}
-)
+# src/config/constants.py
+DEFAULT_MAX_CHARACTERS      = 10000  # ceiling per chunk
+DEFAULT_COMBINE_UNDER_N_CHARS = 2000  # merge short sections with the next
+DEFAULT_NEW_AFTER_N_CHARS   = 6000   # soft split after 6k chars
 ```
 
-**Why LangChain here?** `Chroma` wraps the vector store behind LangChain's `VectorStore` interface. The `.as_retriever()` method returns a `VectorStoreRetriever` that plugs directly into LCEL chains. We can swap Chroma for Pinecone, Weaviate, or FAISS by changing one line — the retrieval chain stays identical.
+`COMBINE_UNDER_N_CHARS=2000` prevents fragmenting short one-paragraph sections into isolated chunks — a common cause of low-recall retrieval. `NEW_AFTER_N_CHARS=6000` keeps sections below the token limit for summarisation without hard-cutting at a fixed byte offset.
 
----
+**Why summaries improve embedding quality**
 
-### 6. Document Model — `Document` (langchain-core)
+`all-MiniLM-L6-v2` has a 256-token sequence limit. Raw 6000-character chunks get silently truncated before embedding, losing the tail of the section entirely. LLM-generated summaries are typically 50–150 tokens — fully within the model's effective range and semantically denser.
 
-> **File:** `src/services/retrieval_service.py`, `src/services/rag_chain.py`
+**Trade-off accepted:** Summarisation adds one LLM call per chunk at ingestion time. For a 50-page document with 40 chunks, that is 40 LLM calls batched at `max_concurrency=3`. This is a deliberate write-time cost to improve read-time retrieval quality.
 
-All documents flowing through the pipeline use LangChain's `Document` class — the standard container for text + metadata.
+**Conversation memory budget:** The last 20 messages are injected into the prompt (`MAX_HISTORY_MESSAGES = 20` in `conversation_service.py`). This is a hard sliding window rather than a rolling summary — simpler to reason about, at the cost of losing older context on very long conversations.
+
+</details>
+
+<details>
+<summary><strong>Stateless LLM Memory via Database</strong></summary>
+
+<br>
+
+LLMs are stateless: every call is independent. Multi-turn conversation requires replaying context on every request. The design decision is *where* to store it and *how much* to inject.
+
+This pipeline uses explicit DB-backed memory rather than LangChain's `RunnableWithMessageHistory`. The reason: `SQLChatMessageHistory` creates its own flat schema and has no concept of user ownership, message sources, or soft-delete. Building on top of it requires a parallel storage system to maintain those properties.
+
+Instead, `ConversationService` manages the full lifecycle:
 
 ```python
-from langchain_core.documents import Document
+# src/services/conversation_service.py
 
-# Storing summaries in vector store with metadata linking to originals
-summary_doc = Document(
-    page_content="This table shows quarterly revenue growth...",
-    metadata={
-        "doc_id": "550e8400-e29b-41d4-a716-446655440000",
-        "type": "table"    # text | table | image
-    }
-)
+# On every /conversations/{id}/ask:
+history = conversation_service.get_history(db, conversation_id, user_id=user_id)
+# → SELECT last 20 messages WHERE conversation_id = ? AND user_id = ?
+# → returned as [{"role": "user", "content": "..."}, ...]
+
+# Injected into the RAG prompt:
+# "Conversation history:\nUser: ...\nAssistant: ..."
+
+# Both turns persisted after LLM responds:
+conversation_service.add_message(db, ..., role=USER,      content=question)
+conversation_service.add_message(db, ..., role=ASSISTANT, content=answer, sources=sources)
 ```
 
-**Why LangChain here?** `Document` is LangChain's universal data container. Every retriever, vector store, and chain expects `Document` objects. Using it means our documents flow seamlessly through the entire LangChain ecosystem without any conversion.
+**User-scoped isolation:** Every conversation query filters by `user_id`. Enforced at the service layer, not just the route.
 
----
+**Sources stored per message:** Each assistant `Message` row carries a `sources: JSON` column containing the `doc_id`, `summary`, and `type` of every chunk the LLM used. This creates a per-response audit trail retrievable via `GET /conversations/{id}/messages`.
 
-### 7. Multi-Modal Messages — `HumanMessage` (langchain-core)
+</details>
 
-> **File:** `src/services/rag_chain.py`
+<details>
+<summary><strong>Authentication and Security Design</strong></summary>
 
-The RAG chain builds multi-modal prompts that include both text context and base64 images, using LangChain's message classes.
+<br>
+
+JWT-based auth using `python-jose` (HS256, 24-hour expiry) with `bcrypt` for password hashing — using the `bcrypt` library directly rather than `passlib`, which breaks on Python 3.12 with bcrypt 4.x due to an unmaintained C binding.
+
+The dependency graph for any protected route:
+
+```
+Route handler
+    └── current_user: User = Depends(get_current_user)   [dependencies/auth.py]
+              └── token: str = Depends(OAuth2PasswordBearer(tokenUrl="/auth/login"))
+              └── db: Session = Depends(get_db)           [dependencies/db.py]
+              └── decode_token(token) → payload["sub"] = user_id
+              └── auth_service.get_by_id(db, user_id) → User
+```
+
+`get_current_user` lives in `src/dependencies/auth.py`. Swapping to RS256 or an external identity provider touches one file, not every route.
+
+Each exception subclass declares its own HTTP status code:
 
 ```python
-from langchain_core.messages import HumanMessage
+# src/core/exceptions.py
+class AuthenticationError(AppError):
+    status_code = 401
 
-def build_prompt(kwargs):
-    docs_by_type = kwargs["context"]
-    user_question = kwargs["question"]
-
-    # Build content blocks: text + images
-    prompt_content = [
-        {"type": "text", "text": f"Context: {context_text}\nQuestion: {user_question}"}
-    ]
-
-    # Attach retrieved images as base64
-    for image in docs_by_type.get("images", []):
-        prompt_content.append({
-            "type": "image_url",
-            "image_url": {"url": f"data:image/jpeg;base64,{image}"},
-        })
-
-    return [HumanMessage(content=prompt_content)]
+class ConflictError(AppError):
+    status_code = 409
 ```
 
-**Why LangChain here?** `HumanMessage` handles multi-modal content blocks natively. The same message format works with any vision-capable LLM (Llava, GPT-4V, Claude) — LangChain handles the provider-specific formatting.
+The global handler reads `exc.status_code` directly — no lookup table, no imports of individual exception classes in `main.py`.
+
+</details>
 
 ---
 
-### End-to-End Data Flow Through LangChain
+## API Reference
 
-```
-                     INGESTION PIPELINE
-                     ==================
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/auth/register` | — | Register. Returns `UserResponse`. |
+| `POST` | `/auth/login` | — | Login (form: `username`, `password`). Returns JWT. |
+| `GET` | `/auth/me` | ✓ | Current authenticated user. |
+| `POST` | `/files/upload` | ✓ | Upload a single document. Returns `file_id`. |
+| `POST` | `/files/upload/multiple` | ✓ | Batch upload. Returns per-file results. |
+| `POST` | `/files/process/{file_id}` | ✓ | Trigger async ingestion pipeline. |
+| `GET` | `/files/status/{file_id}` | ✓ | Poll ingestion status (`uploaded` / `processing` / `processed` / `failed`). |
+| `DELETE` | `/files/delete` | ✓ | Delete a document by `file_id`. |
+| `POST` | `/query/ask` | ✓ | Stateless RAG query. Returns answer + sources. |
+| `POST` | `/conversations` | ✓ | Create a conversation. |
+| `GET` | `/conversations` | ✓ | List your conversations. |
+| `POST` | `/conversations/{id}/ask` | ✓ | Ask with full conversation history injected. |
+| `GET` | `/conversations/{id}/messages` | ✓ | Retrieve message history with sources. |
+| `DELETE` | `/conversations/{id}` | ✓ | Soft-delete a conversation. |
 
- PDF Document
-      │
-      ▼
- ┌─────────────┐
- │ Unstructured │ ── partition() + chunk_by_title()
- │   Library    │    Extracts: texts, tables, images
- └──────┬──────┘
-        │
-        ▼
- ┌──────────────────────────────────┐
- │   LangChain Summarization Chain  │
- │                                  │
- │ Text/Tables:                     │
- │   ChatPromptTemplate             │
- │     | ChatOllama (deepseek-r1)   │
- │     | StrOutputParser            │
- │     .batch(texts, concurrency=3) │
- │                                  │
- │ Images:                          │
- │   ChatPromptTemplate (multimodal)│
- │     | ChatOllama (llava)         │
- │     | StrOutputParser            │
- │     .batch(images, concurrency=3)│
- └──────────┬───────────────────────┘
-            │
-            ▼
- ┌────────────────────────────────────┐
- │  LangChain Chroma Vector Store     │
- │                                    │
- │  Summaries → HuggingFaceEmbeddings │
- │           → Chroma.add_documents() │
- │                                    │
- │  Originals → SimpleDocStore (JSON) │
- │  (linked by doc_id in metadata)    │
- └────────────────────────────────────┘
-
-
-                     QUERY PIPELINE
-                     ==============
-
- User Question: "What are the key findings?"
-      │
-      ▼
- ┌─────────────────────────────────────┐
- │  LangChain LCEL RAG Chain           │
- │                                     │
- │  ┌──────────────────────────────┐   │
- │  │ VectorStoreRetriever         │   │
- │  │  (Chroma.as_retriever)       │   │
- │  │  search_type="similarity"    │   │
- │  │  k=5                         │   │
- │  └──────────┬───────────────────┘   │
- │             │                       │
- │             ▼                       │
- │  ┌──────────────────────────────┐   │
- │  │ RunnableLambda(parse_docs)   │   │
- │  │  Split into: images + texts  │   │
- │  └──────────┬───────────────────┘   │
- │             │                       │
- │             ▼                       │
- │  ┌──────────────────────────────┐   │
- │  │ RunnableLambda(build_prompt)  │   │
- │  │  Multi-modal HumanMessage    │   │
- │  │  with text context + images  │   │
- │  └──────────┬───────────────────┘   │
- │             │                       │
- │             ▼                       │
- │  ┌──────────────────────────────┐   │
- │  │ ChatOllama (deepseek-r1)     │   │
- │  │  Generate answer from context│   │
- │  └──────────┬───────────────────┘   │
- │             │                       │
- │             ▼                       │
- │  ┌──────────────────────────────┐   │
- │  │ StrOutputParser              │   │
- │  │  Extract string response     │   │
- │  └──────────────────────────────┘   │
- └─────────────────────────────────────┘
-      │
-      ▼
- {"answer": "The key findings are...", "sources": [...]}
-```
+Interactive docs at `http://localhost:8000/docs` — the Swagger UI **Authorize** button is wired to the JWT bearer flow.
 
 ---
 
-### Summary: LangChain Components at a Glance
-
-| LangChain Component | Package | File(s) | Purpose |
-|---------------------|---------|---------|---------|
-| `ChatOllama` | `langchain-ollama` | `llm_service.py`, `rag_chain.py` | LLM wrapper for Ollama (Deepseek, Llava) |
-| `ChatPromptTemplate` | `langchain-core` | `llm_service.py` | Structured prompt templates with variable injection |
-| `StrOutputParser` | `langchain-core` | `llm_service.py`, `rag_chain.py` | Parse LLM output to plain string |
-| `RunnableLambda` | `langchain-core` | `rag_chain.py` | Wrap Python functions as chain steps |
-| `RunnablePassthrough` | `langchain-core` | `rag_chain.py` | Pass data through unchanged in chains |
-| `HumanMessage` | `langchain-core` | `rag_chain.py` | Multi-modal message with text + images |
-| `Document` | `langchain-core` | `retrieval_service.py` | Standard text + metadata container |
-| `Chroma` | `langchain-chroma` | `vector_service.py` | Vector store for semantic search |
-| `VectorStoreRetriever` | `langchain-core` | `retrieval_service.py` | Retriever abstraction from vector store |
-| `HuggingFaceEmbeddings` | `langchain-huggingface` | `vector_service.py` | Sentence-transformer embeddings |
-| `.batch()` | `langchain-core` | `ingestion_service.py` | Parallel batch execution with concurrency |
-| LCEL `\|` pipe | `langchain-core` | `llm_service.py`, `rag_chain.py` | Declarative chain composition |
-
----
-
-## API Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/files/upload` | Upload a single document |
-| `POST` | `/files/upload/multiple` | Batch upload multiple files |
-| `POST` | `/files/process/{file_id}` | Trigger document ingestion (async) |
-| `GET` | `/files/status/{file_id}` | Check processing status |
-| `POST` | `/query/ask` | Ask questions about your documents |
-| `DELETE` | `/files/delete?file_id=` | Remove a document |
-
----
-
-## Getting Started
+## Setup
 
 ### Prerequisites
 
-**macOS system dependencies:**
 ```bash
+# macOS — required by Unstructured hi_res strategy
 brew install libmagic poppler tesseract
-```
 
-**Ollama (local LLM server):**
-```bash
+# Ollama — local LLM runtime
 curl -fsSL https://ollama.com/install.sh | sh
-ollama pull deepseek-r1:8b
-ollama pull llava
+ollama pull deepseek-r1:8b   # text LLM
+ollama pull llava             # vision LLM (image summarisation)
 ```
 
-### Installation
+### Install
 
 ```bash
-git clone <repo-url>
-cd ai-document-companion
+git clone https://github.com/MehediHasan-75/AI-Document-Companion.git
+cd AI-Document-Companion
 
-python3 -m venv .venv
-source .venv/bin/activate
+python -m venv .venv
+source .venv/bin/activate       # Windows: .venv\Scripts\activate
 
 pip install -r requirements.txt
 ```
 
-### Run the Server
+### Configure
 
 ```bash
-# Start Ollama first (in a separate terminal)
-ollama serve
-
-# Start the API server
-uvicorn src.main:app --reload
+cp .env.example .env
 ```
 
-Visit **http://localhost:8000/docs** for interactive Swagger documentation.
+Minimum required changes:
 
----
+```env
+# Generate with: openssl rand -hex 32
+SECRET_KEY=your-secret-key-here
 
-## Usage Example
+# SQLite works out of the box for development
+DATABASE_URL=sqlite:///./app.db
+```
+
+### Run
 
 ```bash
-# 1. Upload a document
-curl -X POST "http://localhost:8000/files/upload" \
-  -F "file=@document.pdf"
-# → {"message": "File uploaded successfully", "file_id": "abc123..."}
+uvicorn main:app --reload
+```
 
-# 2. Process the document (runs ingestion pipeline in background)
-curl -X POST "http://localhost:8000/files/process/abc123"
-# → {"status": "processing", "message": "Poll /files/status/abc123 for updates."}
+API at `http://localhost:8000` · Swagger UI at `http://localhost:8000/docs`
 
-# 3. Check status
-curl "http://localhost:8000/files/status/abc123"
-# → {"status": "processed"}
+### Typical Workflow
 
-# 4. Ask questions
-curl -X POST "http://localhost:8000/query/ask" \
+```bash
+# 1. Register
+curl -X POST http://localhost:8000/auth/register \
   -H "Content-Type: application/json" \
-  -d '{"question": "What are the key findings in this document?"}'
-# → {"answer": "The key findings are...", "sources": [...]}
+  -d '{"email": "you@example.com", "password": "yourpassword"}'
+
+# 2. Login — capture token
+TOKEN=$(curl -s -X POST http://localhost:8000/auth/login \
+  -F "username=you@example.com" -F "password=yourpassword" \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
+
+# 3. Upload a document
+FILE_ID=$(curl -s -X POST http://localhost:8000/files/upload \
+  -H "Authorization: Bearer $TOKEN" \
+  -F "file=@/path/to/document.pdf" \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['file_id'])")
+
+# 4. Trigger ingestion (runs in background)
+curl -X POST http://localhost:8000/files/process/$FILE_ID \
+  -H "Authorization: Bearer $TOKEN"
+
+# 5. Poll until "processed"
+curl http://localhost:8000/files/status/$FILE_ID \
+  -H "Authorization: Bearer $TOKEN"
+
+# 6. Stateless query
+curl -X POST http://localhost:8000/query/ask \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"question": "What are the main findings?"}'
+
+# 7. Or start a conversation with persistent memory
+CONV_ID=$(curl -s -X POST http://localhost:8000/conversations \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" -d '{}' \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+
+curl -X POST http://localhost:8000/conversations/$CONV_ID/ask \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"question": "Summarise the methodology section."}'
 ```
 
 ---
@@ -495,47 +407,77 @@ curl -X POST "http://localhost:8000/query/ask" \
 ## Project Structure
 
 ```
-src/
-├── main.py                  # FastAPI app, exception handlers, logging setup
-├── config/
-│   ├── environment.py       # Pydantic Settings (env vars)
-│   ├── constants.py         # Centralized defaults (search_k, temperatures, etc.)
-│   ├── prompts.py           # LLM prompt templates
-│   └── file_types.py        # Allowed MIME types
-├── core/
-│   ├── exceptions.py        # Custom exception hierarchy (AppError → domain errors)
-│   └── logger.py            # Structured logging configuration
-├── routes/                  # FastAPI route definitions
-├── controllers/             # Request handling, delegates to services
-├── services/
-│   ├── file_service.py      # File upload, storage, deletion
-│   ├── process_service.py   # Processing orchestration, status tracking
-│   ├── query_service.py     # RAG query entry point
-│   ├── ingestion_service.py # Full ingestion pipeline (partition → summarize → store)
-│   ├── llm_service.py       # LangChain LLM factories + summarization chains
-│   ├── rag_chain.py         # LangChain LCEL RAG chain construction
-│   ├── vector_service.py    # ChromaDB + DocStore (via LangChain Chroma)
-│   ├── retrieval_service.py # Multi-vector retriever (via LangChain VectorStoreRetriever)
-│   ├── chunk_service.py     # Separate text/table/image elements
-│   └── unstructured_service.py  # Document partitioning (Unstructured library)
-├── models/                  # SQLAlchemy ORM models
-└── db/                      # Database engine, session, base mixins
+.
+├── main.py                         # Uvicorn entrypoint — re-exports src.main:app
+├── requirements.txt
+├── .env.example
+└── src/
+    ├── main.py                     # FastAPI app, middleware stack, exception handlers
+    ├── config/
+    │   ├── constants.py            # Chunk sizes, retrieval K, model names
+    │   ├── environment.py          # Pydantic Settings (all env vars typed)
+    │   ├── file_types.py           # Allowed MIME types (frozenset)
+    │   └── prompts.py              # LLM prompt templates
+    ├── core/
+    │   ├── exceptions.py           # Exception hierarchy — each class owns status_code
+    │   └── logger.py
+    ├── db/
+    │   ├── base.py                 # SQLAlchemy Base, UUIDMixin, TimestampMixin
+    │   └── session.py              # Engine factory, SessionLocal, init_db
+    ├── dependencies/
+    │   ├── auth.py                 # get_current_user (JWT decode → User ORM object)
+    │   └── db.py                   # get_db (request-scoped SQLAlchemy session)
+    ├── models/
+    │   ├── user.py                 # User (email, hashed_password, is_active)
+    │   ├── document.py             # Document (status lifecycle, doc_type enum)
+    │   ├── chunk.py                # Chunk (vector_id FK into Chroma, summary)
+    │   ├── conversation.py         # Conversation (user_id scoped, soft-delete)
+    │   └── message.py              # Message (role enum, content, sources JSON)
+    ├── schemas/
+    │   ├── auth.py                 # RegisterRequest, TokenResponse, UserResponse
+    │   ├── query.py                # QueryRequest
+    │   └── conversation.py         # CreateConversationRequest, ChatRequest
+    ├── routes/
+    │   ├── index.py                # Single aggregation point for all routers
+    │   ├── auth_routes.py
+    │   ├── file_routes.py
+    │   ├── process_routes.py
+    │   ├── query_routes.py
+    │   └── conversation_routes.py
+    ├── controllers/                # Orchestration between routes and services
+    └── services/
+        ├── auth_service.py         # bcrypt hashing, JWT issue/verify
+        ├── file_service.py         # MIME + size validation, streaming chunked write
+        ├── process_service.py      # Background task dispatch, status file tracking
+        ├── ingestion_service.py    # Full pipeline: partition → summarise → index
+        ├── unstructured_service.py # partition() with hi_res + chunk_by_title()
+        ├── chunk_service.py        # Route CompositeElement / Table / Image
+        ├── llm_service.py          # Singleton ChatOllama (text + vision)
+        ├── rag_chain.py            # LCEL chain construction, build_prompt, parse_docs
+        ├── retrieval_service.py    # Multi-vector retriever, add_documents_to_retriever
+        ├── vector_service.py       # Chroma singleton + SQLite DocStore (WAL)
+        ├── query_service.py        # ask_with_sources — single retrieval via chain_with_sources
+        └── conversation_service.py # Message CRUD, 20-message sliding window history
 ```
 
 ---
 
-## Key Design Decisions
+## Supported Document Types
 
-- **Local-first**: Uses Ollama for LLM inference — no API keys or cloud dependencies required
-- **Multi-modal RAG**: Handles text, tables, and images from documents using vision models
-- **Agentic retrieval**: Stores summaries in vector DB, retrieves originals from docstore (multi-vector pattern)
-- **LangChain LCEL**: All chains built with the pipe operator — composable, swappable, batchable
-- **Provider-agnostic**: Swap `ChatOllama` → `ChatOpenAI` or `Chroma` → `Pinecone` with one-line changes
-- **Async processing**: Document ingestion runs in FastAPI background tasks
-- **Clean architecture**: Routes → Controllers → Services separation with custom domain exceptions
+| Format | MIME Type | Notes |
+|--------|-----------|-------|
+| PDF | `application/pdf` | Tables, images, text via `hi_res` layout detection |
+| Word | `application/vnd.openxmlformats-officedocument.wordprocessingml.document` | Styles-aware parsing |
+| PowerPoint | `application/vnd.openxmlformats-officedocument.presentationml.presentation` | Slide-by-slide |
+| Excel | `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` | Sheets extracted as tables |
+| CSV | `text/csv` | Tabular |
+| Markdown | `text/markdown` | Heading hierarchy preserved |
+| HTML | `text/html` | |
+| Plain text | `text/plain` | |
+| JSON | `application/json` | |
 
 ---
 
-## License
-
-MIT License — see [LICENSE](LICENSE)
+<div align="center">
+  <sub>Built by <a href="https://github.com/MehediHasan-75">Mehedi Hasan</a></sub>
+</div>

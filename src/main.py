@@ -9,15 +9,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.cors import CORSMiddleware
 
 from src.config import settings
-from src.core.exceptions import (
-    AppError,
-    AuthenticationError,
-    ConflictError,
-    DocumentNotFoundError,
-    FileNotFoundError,
-    FileValidationError,
-    VectorStoreError,
-)
+from src.core.exceptions import AppError
 from src.core.logger import setup_logging
 from src.db.session import init_db
 from src.routes import index
@@ -64,20 +56,9 @@ async def log_requests(request: Request, call_next):
 
 
 # ── Exception handlers ────────────────────────────────────────────────────────
-_STATUS_MAP = {
-    FileNotFoundError: 404,
-    DocumentNotFoundError: 404,
-    FileValidationError: 400,
-    VectorStoreError: 503,
-    AuthenticationError: 401,
-    ConflictError: 409,
-}
-
-
 @app.exception_handler(AppError)
 async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
-    status_code = _STATUS_MAP.get(type(exc), 500)
-    return JSONResponse(status_code=status_code, content={"detail": exc.message})
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -85,6 +66,7 @@ app.include_router(index.router)
 
 
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
+# Registers a function that runs once when the application starts (before it handles any requests).
 @app.on_event("startup")
 async def on_startup():
     init_db()

@@ -11,6 +11,7 @@ from src.core.exceptions import (
     VectorStoreError,
 )
 from src.core.logger import setup_logging
+from src.db.session import init_db
 from src.routes import index
 
 setup_logging()
@@ -37,6 +38,11 @@ async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
 
 
 app.include_router(index.router)
+
+
+@app.on_event("startup")
+async def on_startup():
+    init_db()
 
 
 @app.get("/", summary="API Root")

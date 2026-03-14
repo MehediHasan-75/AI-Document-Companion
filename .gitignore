@@ -9,3 +9,4 @@ chat_test.md
 chat_test.py
 chroma_db/
 docstore.json
+*.db

@@ -62,6 +62,9 @@ class Settings(BaseSettings):
     # Auth tokens
     HUGGING_FACE_HUB_TOKEN: str | None = None
 
+    # CORS
+    CORS_ALLOWED_ORIGINS: list[str] = ["*"]
+
     # JWT Authentication
     SECRET_KEY: str = "change-this-to-a-long-random-secret-in-production"
     JWT_ALGORITHM: str = "HS256"

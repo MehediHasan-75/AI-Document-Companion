@@ -6,9 +6,9 @@ import logging
 from typing import Any, Dict, List, Optional, TypedDict
 
 from src.core.exceptions import VectorStoreError
-from src.services.vector_service import get_vectorstore, get_docstore
-from src.services.retrieval_service import get_multi_vector_retriever, retrieve_with_sources
 from src.services.rag_chain import get_rag_chain
+from src.services.retrieval_service import get_multi_vector_retriever
+from src.services.vector_service import get_docstore, get_vectorstore
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,6 @@ class QueryService:
     """Service for running RAG queries over ingested documents."""
 
     def _validate_vectorstore(self) -> None:
-        """Raise if the vector store has no documents."""
         vectorstore = get_vectorstore()
         try:
             if vectorstore._collection.count() == 0:
@@ -39,19 +38,35 @@ class QueryService:
     ) -> QueryResponse:
         """Run a RAG query and return the answer with source documents.
 
-        If chat_history is provided (list of {"role", "content"} dicts),
-        previous conversation turns are included in the LLM prompt for
-        context-aware follow-up answers.
+        Fix #1: uses chain_with_sources — retrieval happens once and the
+        sources returned are exactly the documents the LLM received.
         """
-        logger.info("Processing question with sources: %s", question[:100])
+        logger.info("Processing question: %s", question[:100])
+
+        self._validate_vectorstore()
 
         vectorstore = get_vectorstore()
         docstore = get_docstore()
         retriever, id_key = get_multi_vector_retriever(vectorstore)
 
-        sources = retrieve_with_sources(retriever, docstore, question, id_key)
-        chain, _ = get_rag_chain(retriever, chat_history=chat_history)
-        answer = chain.invoke(question)
+        _, chain_with_sources = get_rag_chain(retriever, chat_history=chat_history)
+        result = chain_with_sources.invoke(question)
+
+        answer = result["response"]
+
+        # Sources come from the same retrieval the LLM used — no second round-trip
+        sources: List[Dict[str, Any]] = []
+        for doc in result["context"].get("texts", []):
+            doc_id = doc.metadata.get(id_key) if hasattr(doc, "metadata") else None
+            original = docstore.get(doc_id) if doc_id else None
+            sources.append(
+                {
+                    "summary": doc.page_content if hasattr(doc, "page_content") else str(doc),
+                    "original": original,
+                    "type": doc.metadata.get("type", "text") if hasattr(doc, "metadata") else "text",
+                    "doc_id": doc_id,
+                }
+            )
 
         return {"answer": answer, "sources": sources}
 

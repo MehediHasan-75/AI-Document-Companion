@@ -3,39 +3,31 @@
 from __future__ import annotations
 
 import logging
-from base64 import b64decode
 from typing import Any, Dict, List, Optional, Tuple
 
 from langchain_core.documents import Document
-from langchain_core.messages import HumanMessage, BaseMessage
+from langchain_core.messages import BaseMessage, HumanMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnableLambda, RunnablePassthrough
-from langchain_ollama import ChatOllama
 
-from src.config import settings
-from src.config.constants import SUMMARIZATION_TEMPERATURE
+from src.services.llm_service import get_text_llm  # Fix #3: reuse singleton
 
 logger = logging.getLogger(__name__)
 
 
-def _get_text_llm() -> ChatOllama:
-    return ChatOllama(
-        model=settings.OLLAMA_MODEL,
-        base_url=settings.OLLAMA_HOST,
-        temperature=SUMMARIZATION_TEMPERATURE,
-    )
-
-
 def parse_docs(docs: List[Document]) -> Dict[str, List[Any]]:
-    """Split retrieved documents into base64-encoded images and text documents."""
+    """Split retrieved documents into base64-encoded images and text documents.
+
+    Fix #1: use the 'type' metadata field set during ingestion instead of
+    attempting b64decode (which silently succeeds on many plain-text strings).
+    """
     b64_images: List[str] = []
     text_docs: List[Document] = []
 
     for doc in docs:
-        try:
-            b64decode(doc)
-            b64_images.append(doc)
-        except Exception:
+        if doc.metadata.get("type") == "image":
+            b64_images.append(doc.page_content)
+        else:
             text_docs.append(doc)
 
     return {"images": b64_images, "texts": text_docs}
@@ -51,14 +43,13 @@ def build_prompt(kwargs: Dict[str, Any]) -> List[BaseMessage]:
         [doc.page_content for doc in docs_by_type.get("texts", []) if hasattr(doc, "page_content")]
     )
 
-    # Build history section
     history_section = ""
     if chat_history:
         history_lines = []
         for msg in chat_history:
             role_label = "User" if msg["role"] == "user" else "Assistant"
             history_lines.append(f"{role_label}: {msg['content']}")
-        history_section = f"\nConversation history:\n" + "\n".join(history_lines) + "\n"
+        history_section = "\nConversation history:\n" + "\n".join(history_lines) + "\n"
 
     prompt_template = (
         f"Answer the question based only on the following context, "
@@ -87,10 +78,11 @@ def get_rag_chain(
 ) -> Tuple[Any, Any]:
     """Construct RAG chains for question answering (standard and with sources).
 
-    When chat_history is provided, it is injected into the prompt so the LLM
-    can produce context-aware follow-up answers.
+    chain_with_sources returns {context, question, chat_history, response}.
+    Prefer it over chain: single retrieval, sources match exactly what the LLM saw.
     """
     history = chat_history or []
+    llm = get_text_llm()  # Fix #3: singleton, not a new instance per request
 
     setup_and_retrieval = {
         "context": retriever | RunnableLambda(parse_docs),
@@ -101,14 +93,16 @@ def get_rag_chain(
     chain = (
         setup_and_retrieval
         | RunnableLambda(build_prompt)
-        | _get_text_llm()
+        | llm
         | StrOutputParser()
     )
 
+    # Fix #1: carries context through so the caller gets sources that exactly
+    # match what the LLM received — eliminates the second retrieval call
     chain_with_sources = setup_and_retrieval | RunnablePassthrough().assign(
         response=(
             RunnableLambda(build_prompt)
-            | _get_text_llm()
+            | llm
             | StrOutputParser()
         )
     )

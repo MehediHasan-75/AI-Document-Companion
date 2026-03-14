@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import json
 import logging
-import os
+import sqlite3
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -21,42 +20,48 @@ _docstore: Optional["SimpleDocStore"] = None
 
 
 class SimpleDocStore:
-    """JSON-persisted key-value store for original document content."""
+    """SQLite-backed key-value store for original document content.
+
+    Fix #2: replaces the JSON implementation which rewrote the entire file on
+    every write (O(n) cost) and had no protection against concurrent access.
+    SQLite WAL mode allows multiple concurrent readers and atomic writes.
+    """
 
     def __init__(self, persist_path: Optional[str] = None) -> None:
-        self.store: Dict[str, Any] = {}
-        self.persist_path: Optional[str] = persist_path
-
-        if persist_path and os.path.exists(persist_path):
-            self._load()
+        path = persist_path or ":memory:"
+        # Transparently redirect legacy .json path to .db
+        if path.endswith(".json"):
+            path = path[:-5] + ".db"
+        if path != ":memory:":
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+        # Single persistent connection — required for :memory: and efficient for files
+        self._conn = sqlite3.connect(path, check_same_thread=False)
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS docstore "
+            "(id TEXT PRIMARY KEY, content TEXT NOT NULL)"
+        )
+        self._conn.commit()
 
     def mset(self, items: List[tuple]) -> None:
-        """Set multiple documents at once."""
-        for doc_id, content in items:
-            if hasattr(content, "text"):
-                self.store[doc_id] = str(content)
-            else:
-                self.store[doc_id] = content
-        self._save()
+        """Upsert multiple (id, content) pairs atomically."""
+        rows = [
+            (doc_id, content if isinstance(content, str) else str(content))
+            for doc_id, content in items
+        ]
+        self._conn.executemany(
+            "INSERT OR REPLACE INTO docstore (id, content) VALUES (?, ?)", rows
+        )
+        self._conn.commit()
 
     def get(self, doc_id: str) -> Optional[Any]:
-        """Get a single document by ID."""
-        return self.store.get(doc_id)
+        row = self._conn.execute(
+            "SELECT content FROM docstore WHERE id = ?", (doc_id,)
+        ).fetchone()
+        return row[0] if row else None
 
     def mget(self, doc_ids: List[str]) -> List[Optional[Any]]:
-        """Get multiple documents by IDs."""
-        return [self.store.get(doc_id) for doc_id in doc_ids]
-
-    def _save(self) -> None:
-        if self.persist_path:
-            Path(self.persist_path).parent.mkdir(parents=True, exist_ok=True)
-            with open(self.persist_path, "w", encoding="utf-8") as f:
-                json.dump(self.store, f, ensure_ascii=False, indent=2)
-
-    def _load(self) -> None:
-        if self.persist_path and os.path.exists(self.persist_path):
-            with open(self.persist_path, "r", encoding="utf-8") as f:
-                self.store = json.load(f)
+        return [self.get(doc_id) for doc_id in doc_ids]
 
 
 def get_vectorstore(persist_directory: str = DEFAULT_CHROMA_PERSIST_DIR) -> Chroma:

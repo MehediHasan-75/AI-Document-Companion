@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from base64 import b64decode
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage, BaseMessage
@@ -42,18 +42,29 @@ def parse_docs(docs: List[Document]) -> Dict[str, List[Any]]:
 
 
 def build_prompt(kwargs: Dict[str, Any]) -> List[BaseMessage]:
-    """Build a multi-modal prompt from context documents and user question."""
+    """Build a multi-modal prompt from context documents, chat history, and user question."""
     docs_by_type = kwargs["context"]
     user_question = kwargs["question"]
+    chat_history: List[Dict[str, str]] = kwargs.get("chat_history", [])
 
     context_text = "".join(
         [doc.page_content for doc in docs_by_type.get("texts", []) if hasattr(doc, "page_content")]
     )
 
+    # Build history section
+    history_section = ""
+    if chat_history:
+        history_lines = []
+        for msg in chat_history:
+            role_label = "User" if msg["role"] == "user" else "Assistant"
+            history_lines.append(f"{role_label}: {msg['content']}")
+        history_section = f"\nConversation history:\n" + "\n".join(history_lines) + "\n"
+
     prompt_template = (
         f"Answer the question based only on the following context, "
         f"which can include text, tables, and the below image.\n"
-        f"Context: {context_text}\n"
+        f"Context: {context_text}"
+        f"{history_section}\n"
         f"Question: {user_question}"
     )
 
@@ -70,11 +81,21 @@ def build_prompt(kwargs: Dict[str, Any]) -> List[BaseMessage]:
     return [HumanMessage(content=prompt_content)]
 
 
-def get_rag_chain(retriever: Any) -> Tuple[Any, Any]:
-    """Construct RAG chains for question answering (standard and with sources)."""
+def get_rag_chain(
+    retriever: Any,
+    chat_history: Optional[List[Dict[str, str]]] = None,
+) -> Tuple[Any, Any]:
+    """Construct RAG chains for question answering (standard and with sources).
+
+    When chat_history is provided, it is injected into the prompt so the LLM
+    can produce context-aware follow-up answers.
+    """
+    history = chat_history or []
+
     setup_and_retrieval = {
         "context": retriever | RunnableLambda(parse_docs),
         "question": RunnablePassthrough(),
+        "chat_history": RunnableLambda(lambda _: history),
     }
 
     chain = (

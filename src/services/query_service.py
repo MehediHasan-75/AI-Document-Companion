@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, TypedDict
+from typing import Any, Dict, List, Optional, TypedDict
 
 from src.core.exceptions import VectorStoreError
 from src.services.vector_service import get_vectorstore, get_docstore
@@ -32,8 +32,17 @@ class QueryService:
         except Exception as exc:
             logger.debug("Vector store count check skipped: %s", str(exc))
 
-    def ask_with_sources(self, question: str) -> QueryResponse:
-        """Run a RAG query and return the answer with source documents."""
+    def ask_with_sources(
+        self,
+        question: str,
+        chat_history: Optional[List[Dict[str, str]]] = None,
+    ) -> QueryResponse:
+        """Run a RAG query and return the answer with source documents.
+
+        If chat_history is provided (list of {"role", "content"} dicts),
+        previous conversation turns are included in the LLM prompt for
+        context-aware follow-up answers.
+        """
         logger.info("Processing question with sources: %s", question[:100])
 
         vectorstore = get_vectorstore()
@@ -41,7 +50,7 @@ class QueryService:
         retriever, id_key = get_multi_vector_retriever(vectorstore)
 
         sources = retrieve_with_sources(retriever, docstore, question, id_key)
-        chain, _ = get_rag_chain(retriever)
+        chain, _ = get_rag_chain(retriever, chat_history=chat_history)
         answer = chain.invoke(question)
 
         return {"answer": answer, "sources": sources}

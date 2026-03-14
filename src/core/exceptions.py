@@ -49,3 +49,17 @@ class QueryError(AppError):
 
     def __init__(self, message: str = "Query failed") -> None:
         super().__init__(message)
+
+
+class AuthenticationError(AppError):
+    """Raised when authentication fails (invalid credentials or token)."""
+
+    def __init__(self, message: str = "Authentication failed") -> None:
+        super().__init__(message)
+
+
+class ConflictError(AppError):
+    """Raised when a resource already exists (e.g. duplicate email)."""
+
+    def __init__(self, message: str = "Resource already exists") -> None:
+        super().__init__(message)

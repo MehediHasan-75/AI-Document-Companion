@@ -26,3 +26,6 @@ langchain-community
 langchain-openai
 langchain-groq
 python-dotenv
+python-jose[cryptography]
+passlib[bcrypt]
+email-validator

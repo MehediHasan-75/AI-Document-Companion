@@ -5,6 +5,8 @@ from fastapi.responses import JSONResponse
 
 from src.core.exceptions import (
     AppError,
+    AuthenticationError,
+    ConflictError,
     DocumentNotFoundError,
     FileNotFoundError,
     FileValidationError,
@@ -28,6 +30,8 @@ _STATUS_MAP = {
     DocumentNotFoundError: 404,
     FileValidationError: 400,
     VectorStoreError: 503,
+    AuthenticationError: 401,
+    ConflictError: 409,
 }
 
 

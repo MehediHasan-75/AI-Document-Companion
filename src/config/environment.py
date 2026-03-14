@@ -62,6 +62,11 @@ class Settings(BaseSettings):
     # Auth tokens
     HUGGING_FACE_HUB_TOKEN: str | None = None
 
+    # JWT Authentication
+    SECRET_KEY: str = "change-this-to-a-long-random-secret-in-production"
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
+
     @property
     def embedding_model_name(self) -> str:
         """Short model name extracted from the full model path."""

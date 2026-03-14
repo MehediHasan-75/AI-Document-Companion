@@ -19,30 +19,33 @@ MAX_HISTORY_MESSAGES: int = 20
 class ConversationService:
     """Manages conversation lifecycle and message history."""
 
-    def create_conversation(self, db: Session, title: Optional[str] = None) -> Conversation:
-        """Create a new conversation."""
-        conversation = Conversation(title=title)
+    def create_conversation(
+        self, db: Session, user_id: str, title: Optional[str] = None
+    ) -> Conversation:
+        """Create a new conversation owned by the given user."""
+        conversation = Conversation(title=title, user_id=user_id)
         db.add(conversation)
         db.commit()
         db.refresh(conversation)
-        logger.info("Created conversation %s", conversation.id)
+        logger.info("Created conversation %s for user %s", conversation.id, user_id)
         return conversation
 
-    def get_conversation(self, db: Session, conversation_id: str) -> Conversation:
-        """Get a conversation by ID or raise."""
+    def get_conversation(self, db: Session, conversation_id: str, user_id: str) -> Conversation:
+        """Get a conversation by ID scoped to the given user or raise."""
         conversation = db.query(Conversation).filter(
             Conversation.id == conversation_id,
+            Conversation.user_id == user_id,
             Conversation.is_active.is_(True),
         ).first()
         if not conversation:
             raise DocumentNotFoundError(f"Conversation '{conversation_id}' not found")
         return conversation
 
-    def list_conversations(self, db: Session) -> List[Dict[str, Any]]:
-        """List all active conversations."""
+    def list_conversations(self, db: Session, user_id: str) -> List[Dict[str, Any]]:
+        """List all active conversations for the given user."""
         conversations = (
             db.query(Conversation)
-            .filter(Conversation.is_active.is_(True))
+            .filter(Conversation.is_active.is_(True), Conversation.user_id == user_id)
             .order_by(Conversation.updated_at.desc())
             .all()
         )
@@ -57,9 +60,9 @@ class ConversationService:
             for c in conversations
         ]
 
-    def delete_conversation(self, db: Session, conversation_id: str) -> None:
+    def delete_conversation(self, db: Session, conversation_id: str, user_id: str) -> None:
         """Soft-delete a conversation."""
-        conversation = self.get_conversation(db, conversation_id)
+        conversation = self.get_conversation(db, conversation_id, user_id)
         conversation.deactivate()
         db.commit()
         logger.info("Deactivated conversation %s", conversation_id)
@@ -70,10 +73,11 @@ class ConversationService:
         conversation_id: str,
         role: MessageRole,
         content: str,
+        user_id: str,
         sources: Optional[List[Dict[str, Any]]] = None,
     ) -> Message:
         """Append a message to a conversation."""
-        conversation = self.get_conversation(db, conversation_id)
+        conversation = self.get_conversation(db, conversation_id, user_id)
 
         message = Message(
             conversation_id=conversation_id,
@@ -95,9 +99,11 @@ class ConversationService:
         self,
         db: Session,
         conversation_id: str,
+        user_id: str,
         limit: int = MAX_HISTORY_MESSAGES,
     ) -> List[Dict[str, str]]:
         """Return recent messages as role/content dicts for LLM context."""
+        self.get_conversation(db, conversation_id, user_id)  # validate ownership
         messages = (
             db.query(Message)
             .filter(Message.conversation_id == conversation_id)
@@ -105,13 +111,12 @@ class ConversationService:
             .limit(limit)
             .all()
         )
-        # Reverse to chronological order
         messages.reverse()
         return [{"role": m.role.value, "content": m.content} for m in messages]
 
-    def get_messages(self, db: Session, conversation_id: str) -> List[Dict[str, Any]]:
+    def get_messages(self, db: Session, conversation_id: str, user_id: str) -> List[Dict[str, Any]]:
         """Return all messages for a conversation (API response format)."""
-        self.get_conversation(db, conversation_id)  # validate exists
+        self.get_conversation(db, conversation_id, user_id)  # validate ownership
         messages = (
             db.query(Message)
             .filter(Message.conversation_id == conversation_id)

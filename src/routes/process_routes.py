@@ -5,16 +5,21 @@ Defines endpoints for triggering document processing and querying processing
 status for previously uploaded files.
 """
 
-from fastapi import APIRouter, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, Depends
 
 from src.controllers.process_controller import process_controller
-
+from src.dependencies.auth import get_current_user
+from src.models.user import User
 
 router = APIRouter(prefix="/files", tags=["Processing"])
 
 
 @router.post("/process/{file_id}", summary="Process an uploaded file")
-async def process_file(file_id: str, background_tasks: BackgroundTasks):
+async def process_file(
+    file_id: str,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+):
     """
     Run the ingestion (RAG) pipeline for the given ``file_id`` in the background.
     Returns immediately with status 'processing'. Poll /status/{file_id} for updates.
@@ -23,7 +28,10 @@ async def process_file(file_id: str, background_tasks: BackgroundTasks):
 
 
 @router.get("/status/{file_id}", summary="Get processing status for a file")
-async def get_status(file_id: str):
+async def get_status(
+    file_id: str,
+    current_user: User = Depends(get_current_user),
+):
     """
     Return the current processing status for the given ``file_id``.
     """

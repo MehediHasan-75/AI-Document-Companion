@@ -76,7 +76,7 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def init_db() -> None:
     """Create all database tables."""
-    from src.models import document, conversation, message, chunk  # noqa: F401
+    from src.models import document, conversation, message, chunk, user  # noqa: F401
     Base.metadata.create_all(bind=engine)
     logger.info("Database tables created")
 

@@ -38,6 +38,7 @@ class Document(Base, UUIDMixin, TimestampMixin):
     """Database model for document metadata."""
     __tablename__ = "documents"
 
+    user_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
     filename: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     content_type: Mapped[str] = mapped_column(String(100), nullable=False)
     doc_type: Mapped[DocumentType] = mapped_column(

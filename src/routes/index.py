@@ -1,9 +1,4 @@
-"""
-Routes Index Module
--------------------
-
-Aggregates all route modules in the routes/ folder.
-"""
+"""Route aggregation for all API modules."""
 
 from fastapi import APIRouter
 
@@ -14,7 +9,3 @@ router = APIRouter()
 router.include_router(file_routes.router)
 router.include_router(process_routes.router)
 router.include_router(query_routes.router)
-
-# Future routers can be added here, e.g.:
-# from . import user_routes
-# router.include_router(user_routes.router)

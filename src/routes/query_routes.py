@@ -20,4 +20,4 @@ async def ask(payload: QueryRequest):
     """
     Ask a question over the currently ingested documents.
     """
-    return query_controller.ask(payload.question)
+    return query_controller.ask_with_sources(payload.question)

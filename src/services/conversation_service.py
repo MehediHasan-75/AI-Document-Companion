@@ -155,7 +155,9 @@ class ConversationService:
 
         self.add_message(db, conversation_id, MessageRole.USER, question, user_id=user_id)
 
-        result = query_service.ask_with_sources(question, chat_history=history)
+        result = query_service.ask_with_sources(
+            question, chat_history=history, user_id=user_id
+        )
 
         self.add_message(
             db,

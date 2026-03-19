@@ -61,7 +61,16 @@ class SimpleDocStore:
         return row[0] if row else None
 
     def mget(self, doc_ids: List[str]) -> List[Optional[Any]]:
-        return [self.get(doc_id) for doc_id in doc_ids]
+        """Batch-fetch multiple documents in a single query."""
+        if not doc_ids:
+            return []
+        placeholders = ",".join("?" * len(doc_ids))
+        rows = self._conn.execute(
+            f"SELECT id, content FROM docstore WHERE id IN ({placeholders})",
+            doc_ids,
+        ).fetchall()
+        lookup = dict(rows)
+        return [lookup.get(doc_id) for doc_id in doc_ids]
 
 
 def get_vectorstore(persist_directory: str = DEFAULT_CHROMA_PERSIST_DIR) -> Chroma:

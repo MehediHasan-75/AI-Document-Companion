@@ -24,7 +24,9 @@ def process_file(
     Run the ingestion (RAG) pipeline for the given ``file_id`` in the background.
     Returns immediately with status 'processing'. Poll /status/{file_id} for updates.
     """
-    return process_service.process_file_async(file_id, background_tasks)
+    return process_service.process_file_async(
+        file_id, background_tasks, user_id=current_user.id
+    )
 
 
 @router.get("/status/{file_id}", summary="Get processing status for a file")
@@ -36,4 +38,3 @@ def get_status(
     Return the current processing status for the given ``file_id``.
     """
     return process_service.get_status(file_id)
-

@@ -4,35 +4,40 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import Any, Dict, List, Optional, Tuple, TypedDict
+from typing import Any, Dict, List, Optional, Tuple
 
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from langchain_core.vectorstores import VectorStoreRetriever
 
-from src.config.constants import DEFAULT_SEARCH_K, DEFAULT_SEARCH_TYPE, DEFAULT_ID_KEY
+from src.config.constants import DEFAULT_FETCH_K, DEFAULT_SEARCH_K, DEFAULT_SEARCH_TYPE, DEFAULT_ID_KEY
 from src.services.vector_service import SimpleDocStore
 
 logger = logging.getLogger(__name__)
-
-
-class SourceResult(TypedDict):
-    summary: str
-    original: Optional[str]
-    type: str
-    doc_id: Optional[str]
 
 
 def get_multi_vector_retriever(
     vectorstore: Chroma,
     search_type: str = DEFAULT_SEARCH_TYPE,
     search_k: int = DEFAULT_SEARCH_K,
+    user_id: Optional[str] = None,
 ) -> Tuple[VectorStoreRetriever, str]:
-    """Create a retriever from a vectorstore. Returns (retriever, id_key)."""
+    """Create a retriever from a vectorstore with optional user-scoping.
+
+    Uses MMR (Maximal Marginal Relevance) by default to ensure diversity
+    in retrieved results — avoids returning 5 near-duplicate chunks.
+    """
     id_key = DEFAULT_ID_KEY
+
+    search_kwargs: Dict[str, Any] = {"k": search_k}
+    if search_type == "mmr":
+        search_kwargs["fetch_k"] = DEFAULT_FETCH_K
+    if user_id:
+        search_kwargs["filter"] = {"user_id": user_id}
+
     retriever = vectorstore.as_retriever(
         search_type=search_type,
-        search_kwargs={"k": search_k},
+        search_kwargs=search_kwargs,
     )
     return retriever, id_key
 
@@ -47,9 +52,17 @@ def add_documents_to_retriever(
     images: Optional[List[str]] = None,
     image_summaries: Optional[List[str]] = None,
     id_key: str = DEFAULT_ID_KEY,
+    user_id: Optional[str] = None,
 ) -> Dict[str, int]:
-    """Index documents: summaries in vector store, originals in doc store."""
+    """Index documents: summaries in vector store, originals in doc store.
+
+    When user_id is provided, it is stored in metadata so retrieval can be
+    scoped per-user via Chroma's metadata filtering.
+    """
     counts = {"texts": 0, "tables": 0, "images": 0}
+    base_meta: Dict[str, Any] = {}
+    if user_id:
+        base_meta["user_id"] = user_id
 
     if texts and text_summaries:
         if len(texts) != len(text_summaries):
@@ -60,7 +73,7 @@ def add_documents_to_retriever(
         summary_docs = [
             Document(
                 page_content=summary,
-                metadata={id_key: text_ids[i], "type": "text"},
+                metadata={id_key: text_ids[i], "type": "text", **base_meta},
             )
             for i, summary in enumerate(text_summaries)
         ]
@@ -78,7 +91,7 @@ def add_documents_to_retriever(
         summary_docs = [
             Document(
                 page_content=summary,
-                metadata={id_key: table_ids[i], "type": "table"},
+                metadata={id_key: table_ids[i], "type": "table", **base_meta},
             )
             for i, summary in enumerate(table_summaries)
         ]
@@ -99,7 +112,7 @@ def add_documents_to_retriever(
         summary_docs = [
             Document(
                 page_content=summary,
-                metadata={id_key: img_ids[i], "type": "image"},
+                metadata={id_key: img_ids[i], "type": "image", **base_meta},
             )
             for i, summary in enumerate(image_summaries)
         ]
@@ -109,29 +122,3 @@ def add_documents_to_retriever(
         logger.info("Added %d images", len(images))
 
     return counts
-
-
-def retrieve_with_sources(
-    retriever: VectorStoreRetriever,
-    docstore: SimpleDocStore,
-    query: str,
-    id_key: str = DEFAULT_ID_KEY,
-) -> List[SourceResult]:
-    """Retrieve matching summaries and their original source content."""
-    matched_summaries = retriever.invoke(query)
-
-    results: List[SourceResult] = []
-    for doc in matched_summaries:
-        doc_id = doc.metadata.get(id_key)
-        original = docstore.get(doc_id) if doc_id else None
-        results.append(
-            {
-                "summary": doc.page_content,
-                "original": original,
-                "type": doc.metadata.get("type", "text"),
-                "doc_id": doc_id,
-            }
-        )
-
-    logger.info("Retrieved %d sources for query", len(results))
-    return results

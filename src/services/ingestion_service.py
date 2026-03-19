@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, TypedDict
+from typing import Any, Dict, List, Optional, TypedDict
 
-from langchain_chroma import Chroma
 from langchain_core.vectorstores import VectorStoreRetriever
 
 from src.config.constants import DEFAULT_MAX_CONCURRENCY
@@ -35,12 +34,16 @@ class ExtractionStats(TypedDict):
 def ingest_document_pipeline(
     file_path: str,
     max_concurrency: int = DEFAULT_MAX_CONCURRENCY,
+    user_id: Optional[str] = None,
 ) -> IngestionResult:
     """
     Run the full ingestion pipeline for a document:
     1. Partition into text, tables, images
     2. Summarize each content type via LLM
     3. Store summaries in vector DB, originals in doc store
+
+    When user_id is provided, documents are tagged with it in metadata
+    so retrieval can be scoped per-user.
     """
     logger.info("Starting ingestion pipeline for %s", file_path)
 
@@ -82,7 +85,7 @@ def ingest_document_pipeline(
 
     vectorstore = get_vectorstore()
     docstore = get_docstore()
-    retriever, id_key = get_multi_vector_retriever(vectorstore)
+    retriever, id_key = get_multi_vector_retriever(vectorstore, user_id=user_id)
 
     add_documents_to_retriever(
         vectorstore,
@@ -94,6 +97,7 @@ def ingest_document_pipeline(
         images,
         image_summaries,
         id_key,
+        user_id=user_id,
     )
 
     logger.info("Ingestion pipeline completed for %s", file_path)

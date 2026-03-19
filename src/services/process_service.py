@@ -63,11 +63,11 @@ class ProcessService:
             "status": DocumentStatus.UPLOADED.value,
         }
 
-    def _run_pipeline(self, file_id: str, file_path: str) -> None:
+    def _run_pipeline(self, file_id: str, file_path: str, user_id: str) -> None:
         """Execute the ingestion pipeline, updating status on completion or failure."""
-        logger.info("Starting pipeline for file %s", file_id)
+        logger.info("Starting pipeline for file %s (user %s)", file_id, user_id)
         try:
-            ingest_document_pipeline(file_path)
+            ingest_document_pipeline(file_path, user_id=user_id)
             self._write_status(file_id, DocumentStatus.PROCESSED)
             logger.info("Pipeline completed successfully for %s", file_id)
         except Exception as exc:
@@ -78,6 +78,7 @@ class ProcessService:
         self,
         file_id: str,
         background_tasks: "BackgroundTasks",
+        user_id: str,
     ) -> Dict[str, Any]:
         """Queue the file for background processing."""
         file_path = file_service.get_file_path(file_id)
@@ -85,7 +86,7 @@ class ProcessService:
             raise DocumentNotFoundError(f"File with id '{file_id}' not found")
 
         self._write_status(file_id, DocumentStatus.PROCESSING)
-        background_tasks.add_task(self._run_pipeline, file_id, str(file_path))
+        background_tasks.add_task(self._run_pipeline, file_id, str(file_path), user_id)
         logger.info("Async processing started for %s", file_id)
 
         return {

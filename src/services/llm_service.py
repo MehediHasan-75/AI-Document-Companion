@@ -1,4 +1,4 @@
-"""LLM service for document summarization."""
+"""LLM service for document summarization and question answering."""
 
 from __future__ import annotations
 
@@ -10,17 +10,24 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_ollama import ChatOllama
 
 from src.config import settings
-from src.config.constants import SUMMARIZATION_TEMPERATURE, VISION_MODEL, VISION_TEMPERATURE
+from src.config.constants import (
+    LLM_MAX_RETRIES,
+    QA_TEMPERATURE,
+    SUMMARIZATION_TEMPERATURE,
+    VISION_MODEL,
+    VISION_TEMPERATURE,
+)
 from src.config.prompts import TEXT_TABLE_SUMMARIZATION_PROMPT, IMAGE_SUMMARIZATION_PROMPT
 
 logger = logging.getLogger(__name__)
 
-# Fix #3: singleton LLM instances — one connection reused across all requests
 _text_llm: Optional[ChatOllama] = None
+_qa_llm: Optional[ChatOllama] = None
 _vision_llm: Optional[ChatOllama] = None
 
 
 def get_text_llm() -> ChatOllama:
+    """Singleton LLM for summarization (low temperature for factual extraction)."""
     global _text_llm
     if _text_llm is None:
         _text_llm = ChatOllama(
@@ -29,6 +36,18 @@ def get_text_llm() -> ChatOllama:
             temperature=SUMMARIZATION_TEMPERATURE,
         )
     return _text_llm
+
+
+def get_qa_llm() -> ChatOllama:
+    """Singleton LLM for QA (higher temperature for fluent synthesis)."""
+    global _qa_llm
+    if _qa_llm is None:
+        _qa_llm = ChatOllama(
+            model=settings.OLLAMA_MODEL,
+            base_url=settings.OLLAMA_HOST,
+            temperature=QA_TEMPERATURE,
+        ).with_retry(stop_after_attempt=LLM_MAX_RETRIES)
+    return _qa_llm
 
 
 def _get_vision_llm() -> ChatOllama:

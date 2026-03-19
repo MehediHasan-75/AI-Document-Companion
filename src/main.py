@@ -26,7 +26,9 @@ app = FastAPI(
 
 # ── Middleware ────────────────────────────────────────────────────────────────
 # Registration order matters: last added = outermost (first to handle request).
-# Execution order: CORS → GZip → request logging → route handler
+# Execution order:
+# Request: log_requests → GZip → CORS → route handler
+# Response: route handler → CORS → GZip → log_requests
 
 app.add_middleware(
     CORSMiddleware,
@@ -69,6 +71,11 @@ app.include_router(index.router)
 # Registers a function that runs once when the application starts (before it handles any requests).
 @app.on_event("startup")
 async def on_startup():
+    if settings.SECRET_KEY == "change-this-to-a-long-random-secret-in-production":
+        logger.warning(
+            "SECRET_KEY is the insecure default — set a strong random secret "
+            "in .env before deploying to production (openssl rand -hex 32)"
+        )
     init_db()
 
 

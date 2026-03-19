@@ -1,14 +1,10 @@
-"""Shared database dependency for FastAPI routes."""
+"""Provide a scoped SQLAlchemy DB session per request, ensuring proper cleanup."""
 
-from typing import Generator
-
+from collections.abc import Iterator
 from sqlalchemy.orm import Session
-
 from src.db.session import SessionLocal
 
-
-def get_db() -> Generator[Session, None, None]:
-    """Provide a request-scoped database session."""
+def get_db() -> Iterator[Session]:
     db = SessionLocal()
     try:
         yield db

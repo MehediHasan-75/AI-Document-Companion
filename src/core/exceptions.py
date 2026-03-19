@@ -39,6 +39,13 @@ class AuthenticationError(AppError):
         super().__init__(message)
 
 
+class ForbiddenError(AppError):
+    status_code = 403
+
+    def __init__(self, message: str = "Access denied") -> None:
+        super().__init__(message)
+
+
 class ConflictError(AppError):
     status_code = 409
 

@@ -395,9 +395,16 @@ The auth logic and session management are written **once** and reused everywhere
 
 ## Pydantic Schemas: Validating Everything Automatically
 
-Pydantic models serve as contracts between the client and the API. They're defined in `src/schemas/`.
+Pydantic models serve as contracts between the client and the API. They do two jobs — both triggered automatically by FastAPI:
 
-### Request Validation
+- **Deserialization + Validation (request):** JSON → validated Python object
+- **Serialization (response):** Python object → filtered JSON
+
+You never manually parse `request.body()`, call `.is_valid()`, or build JSON. Type hints drive everything.
+
+### Deserialization: How Requests Are Validated
+
+When a route parameter has a Pydantic model type, FastAPI reads the JSON body, validates every field, and gives you a typed Python object — all **before your route code runs**:
 
 ```python
 # src/schemas/auth.py
@@ -405,15 +412,24 @@ class RegisterRequest(BaseModel):
     email: EmailStr                                    # Must be a valid email
     password: str = Field(..., min_length=8, max_length=128)  # 8-128 chars
     full_name: Optional[str] = None                    # Optional, defaults to None
+
+# src/routes/auth_routes.py
+@router.post("/register")
+def register(payload: RegisterRequest):
+    # If we get here, payload is ALREADY validated:
+    # - payload.email is a valid email string
+    # - payload.password is 8-128 chars
+    # - payload.full_name is str or None
+    print(payload.email)
 ```
 
-When a client sends `POST /auth/register` with JSON:
+If the client sends invalid data:
 
 ```json
 {"email": "not-an-email", "password": "short"}
 ```
 
-FastAPI + Pydantic reject it **before your route code runs** and return:
+FastAPI rejects it automatically with a 422 and field-level errors — your route never executes:
 
 ```json
 {
@@ -424,9 +440,7 @@ FastAPI + Pydantic reject it **before your route code runs** and return:
 }
 ```
 
-You get this validation for free — no `if len(password) < 8` anywhere.
-
-### Special Validators
+**Common validators:**
 
 | Type | What It Validates |
 |------|------------------|
@@ -434,7 +448,9 @@ You get this validation for free — no `if len(password) < 8` anywhere.
 | `Field(..., min_length=8)` | Minimum string length. The `...` means "required" (no default). |
 | `Optional[str] = None` | Field can be omitted or `null` — defaults to `None` |
 
-### Response Serialization
+### Serialization: How Responses Are Filtered
+
+The `response_model` parameter controls what the client sees:
 
 ```python
 class UserResponse(BaseModel):
@@ -443,26 +459,18 @@ class UserResponse(BaseModel):
     full_name: Optional[str]
     is_active: bool
     created_at: datetime
-```
 
-When used with `response_model=UserResponse`:
-
-```python
 @router.post("/register", response_model=UserResponse, status_code=201)
 def register(...):
-    ...
-    return UserResponse(id=user.id, email=user.email, ...)
+    user = auth_service.register(db, ...)  # ORM object with ALL fields (including hashed_password)
+    return user                             # FastAPI filters through UserResponse → only safe fields
 ```
 
 This does two things:
-1. **Filters the response** — only fields defined in `UserResponse` are included. Even if your `User` ORM object has `hashed_password`, it won't leak into the response.
+1. **Filters the response** — only fields in `UserResponse` are included. Even though the `User` ORM object has `hashed_password`, it won't leak into the JSON.
 2. **Generates documentation** — Swagger UI shows the exact response shape clients should expect.
 
-### Why Schemas Are Separate from Models
-
-You might wonder: "The `User` model already has `email`, `full_name`, etc. — why create `UserResponse` separately?"
-
-Because they serve different purposes:
+### Why Schemas Are Separate from ORM Models
 
 | | ORM Model (`models/user.py`) | Pydantic Schema (`schemas/auth.py`) |
 |--|------|--------|
@@ -470,58 +478,9 @@ Because they serve different purposes:
 | **Contains** | Everything in the DB (including `hashed_password`) | Only what the client should see |
 | **Used by** | SQLAlchemy (internal) | FastAPI (external-facing) |
 
-This separation is intentional. Your database schema and your API contract evolve independently. You might add a column to the database without exposing it to the API, or reshape the API response without touching the database.
-
-### What Pydantic Actually Does: Serialization and Deserialization
-
-Pydantic models do two jobs, both triggered automatically by FastAPI:
-
-**Deserialization (request)** — JSON → Python object:
-
-```python
-@router.post("/register")
-def register(payload: RegisterRequest):   # FastAPI does all of this automatically:
-    # 1. Reads raw JSON from request body
-    # 2. Validates every field (types, constraints like min_length)
-    # 3. Creates a RegisterRequest object
-    # 4. Rejects with 422 if anything is invalid
-    print(payload.email)  # Already a validated Python string
-```
-
-**Serialization (response)** — Python object → JSON:
-
-```python
-@router.get("/users/{id}", response_model=UserResponse)
-def get_user(id: str):
-    user = db.query(User).first()  # ORM object with ALL fields (including hashed_password)
-    return user                     # FastAPI filters it through UserResponse → only safe fields in JSON
-```
-
-You never manually parse `request.body()` or call `.to_json()`. Type hints drive everything.
+They evolve independently. You might add a database column without exposing it in the API, or reshape the API response without touching the database.
 
 ### Coming from Django REST Framework?
-
-If you've used DRF serializers, here's the key difference:
-
-**Django REST Framework — explicit, manual steps:**
-
-```python
-# DRF: you drive the serializer manually
-serializer = UserSerializer(data=request.data)
-if serializer.is_valid():         # Manual validation call
-    serializer.save()             # Manual save call
-return Response(serializer.data)  # Manual serialization call
-```
-
-**FastAPI / Pydantic — implicit, type-hint driven:**
-
-```python
-# FastAPI: validation and serialization happen automatically
-@router.post("/users", response_model=UserResponse)
-def create_user(payload: RegisterRequest):   # Validated before this line runs
-    user = auth_service.register(db, payload.email, payload.password)
-    return user                               # Serialized automatically on the way out
-```
 
 | | Django REST Framework | FastAPI + Pydantic |
 |--|----------------------|-------------------|
@@ -531,7 +490,21 @@ def create_user(payload: RegisterRequest):   # Validated before this line runs
 | **Error responses** | Manual: `return Response(serializer.errors, status=400)` | Automatic 422 with field-level details |
 | **Type safety** | Runtime only | IDE autocomplete + static type checking |
 
-The bottom line: Pydantic models are **declarative**. You describe the shape once, and FastAPI handles validation, parsing, serialization, error responses, and documentation generation — all from that single class definition.
+```python
+# DRF: three manual steps
+serializer = UserSerializer(data=request.data)
+if serializer.is_valid():         # 1. Manual validation
+    serializer.save()             # 2. Manual save
+return Response(serializer.data)  # 3. Manual serialization
+
+# FastAPI: zero manual steps
+@router.post("/users", response_model=UserResponse)
+def create_user(payload: RegisterRequest):   # Validated automatically
+    user = auth_service.register(db, payload.email, payload.password)
+    return user                               # Serialized automatically
+```
+
+Pydantic models are **declarative** — you describe the shape once, and FastAPI handles validation, parsing, serialization, error responses, and documentation generation from that single class definition.
 
 ---
 

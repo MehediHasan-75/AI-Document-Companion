@@ -38,8 +38,8 @@ def partition_document(
     extract_kwargs = {}
     if extract_images:
         extract_kwargs = {
-            "pdf_extract_image_block_types": DEFAULT_IMAGE_TYPES,
-            "pdf_extract_image_block_to_payload": True,
+            "extract_image_block_types": DEFAULT_IMAGE_TYPES,
+            "extract_image_block_to_payload": True,
         }
 
     elements = partition(

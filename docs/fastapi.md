@@ -1052,7 +1052,7 @@ FastAPI generates interactive API documentation automatically from your code. No
 
 Visit `http://localhost:8000/docs` in your browser. You'll see:
 
-- Every endpoint grouped by `tags` (Auth, Files, Processing, Query, Conversations)
+- Every endpoint grouped by `tags` (Auth, Files, Processing, Query, Conversations, Chat)
 - Request/response schemas generated from your Pydantic models
 - An "Authorize" button for entering your JWT token
 - A "Try it out" button on every endpoint for live testing
@@ -1117,5 +1117,19 @@ Visit `http://localhost:8000/docs` in your browser. You'll see:
 | POST | `/conversations` | Yes | `CreateConversationRequest` (JSON) | `{id, title, created_at}` | 200 |
 | GET | `/conversations` | Yes | — | `[{id, title, message_count, ...}]` | 200 |
 | GET | `/conversations/{id}/messages` | Yes | — | `[{id, role, content, sources, ...}]` | 200 |
-| POST | `/conversations/{id}/ask` | Yes | `ChatRequest` (JSON) | `{conversation_id, answer, sources[]}` | 200 |
+| POST | `/conversations/{id}/ask` | Yes | `ChatRequest` (JSON) | SSE stream (`text/event-stream`) | 200 |
 | DELETE | `/conversations/{id}` | Yes | — | `{message, id}` | 200 |
+
+**`/conversations/{id}/ask` streams token-by-token via SSE.** Request body:
+```json
+{
+  "question": "What are my documents about?"
+}
+```
+
+**SSE event types:**
+- `{"type": "delta", "content": "..."}` — incremental LLM token
+- `{"type": "complete", "content": "full response", "conversation_id": "uuid", "sources": [...]}` — final message with sources
+- `{"type": "error", "content": "error details"}` — error notification
+
+Uses the same RAG pipeline as `/query/ask` but streams the LLM response token-by-token instead of buffering it. Chat history is loaded from the conversation and injected into the prompt. Messages (user + assistant) and sources are persisted.

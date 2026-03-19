@@ -45,6 +45,23 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 
 @app.middleware("http")
+async def skip_gzip_for_sse(request: Request, call_next):
+    """Disable GZip for SSE streaming endpoints.
+
+    GZip buffers small chunks before compressing, which kills
+    token-by-token streaming. We strip the Accept-Encoding header
+    for SSE paths so the GZip middleware passes them through uncompressed.
+    """
+    if request.url.path.endswith("/stream"):
+        # Remove Accept-Encoding so GZipMiddleware won't compress
+        scope = request.scope
+        headers = [(k, v) for k, v in scope["headers"] if k != b"accept-encoding"]
+        scope["headers"] = headers
+    response = await call_next(request)
+    return response
+
+
+@app.middleware("http")
 async def log_requests(request: Request, call_next):
     """Log method, path, status code, and response time for every request."""
     start = time.perf_counter()

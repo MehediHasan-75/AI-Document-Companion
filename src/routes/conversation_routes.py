@@ -1,6 +1,7 @@
 """Conversation routes for chat with memory."""
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from src.dependencies.auth import get_current_user
@@ -13,6 +14,7 @@ from src.schemas.conversation import (
     DeleteConversationResponse,
 )
 from src.services.conversation_service import conversation_service
+from src.services.streaming_service import stream_chat_response
 
 router = APIRouter(prefix="/conversations", tags=["Conversations"])
 
@@ -63,14 +65,14 @@ def get_messages(
 
 @router.post(
     "/{conversation_id}/ask",
-    summary="Ask a question within a conversation",
+    summary="Ask a question — streams response token-by-token via SSE",
     responses={
         401: {"description": "Invalid or expired token"},
         404: {"description": "Conversation not found"},
         422: {"description": "Query failed"},
     },
 )
-def ask_in_conversation(
+async def ask_in_conversation(
     conversation_id: str,
     payload: ChatRequest,
     db: Session = Depends(get_db),
@@ -78,10 +80,30 @@ def ask_in_conversation(
 ):
     """Ask a question with full conversation history as context.
 
+    Streams the LLM response token-by-token via Server-Sent Events.
     Previous messages are automatically loaded and injected into the
-    LLM prompt so the model can give context-aware follow-up answers.
+    LLM prompt for context-aware follow-up answers.
+
+    **SSE event types:**
+
+    - ``{"type": "delta", "content": "..."}`` — incremental token
+    - ``{"type": "complete", "content": "...", "conversation_id": "...", "sources": [...]}`` — final
+    - ``{"type": "error", "content": "..."}`` — error
     """
-    return conversation_service.ask(db, conversation_id, payload.question, user_id=current_user.id)
+    return StreamingResponse(
+        stream_chat_response(
+            question=payload.question,
+            user_id=current_user.id,
+            db=db,
+            conversation_id=conversation_id,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.delete(

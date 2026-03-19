@@ -36,7 +36,7 @@ The architecture is intentionally layered. Every design decision has a concrete 
 | **DB-backed chat memory** instead of LangChain's `RunnableWithMessageHistory` | LangChain memory has no user-scoping, no source tracking, no soft-delete | Manual history injection into prompts |
 | **Title-based chunking** via `chunk_by_title()` instead of `RecursiveCharacterTextSplitter` | Character splitting cuts across table rows, bullet items, and section boundaries | Depends on Unstructured's layout model quality |
 | **User-scoped vector retrieval** — `user_id` metadata filter on ChromaDB | Without it, User A's queries could surface User B's documents | Every ingestion and retrieval call must pass `user_id` |
-| **Streaming SSE endpoint** alongside sync endpoint | Users wait 3-5s for full LLM generation; streaming shows tokens immediately | More complex client integration |
+| **Streaming SSE on conversation `/ask`** | Users wait 3-5s for full LLM generation; streaming shows tokens immediately | More complex client integration (SSE parsing) |
 | **`<user_question>` XML tags** in RAG prompt | Prompt injection — user can embed "ignore all instructions" in their question | Not bulletproof, but raises the bar significantly |
 | **Sync `def` routes** (not `async def`) | All I/O is synchronous (SQLAlchemy ORM, Ollama HTTP, file ops); `async def` with sync calls freezes the event loop | Cannot use async LangChain methods (`.ainvoke()`) without full async migration |
 
@@ -62,14 +62,15 @@ The architecture is intentionally layered. Every design decision has a concrete 
           ▼           ▼               ▼
    ┌─────────────┐ ┌────────┐ ┌─────────────────┐
    │ auth_routes │ │ files  │ │  conversations  │
-   │  /register  │ │/upload │ │  /ask  /list    │
-   │  /login /me │ │/process│ └────────┬────────┘
-   └──────┬──────┘ └───┬────┘          │
+   │  /register  │ │/upload │ │ /ask (SSE stream)│
+   │  /login /me │ │/process│ │  /list /messages │
+   └──────┬──────┘ └───┬────┘ └────────┬─────────┘
           │            │               │
           ▼            ▼               ▼
    ┌─────────────────────────────────────────────┐
    │               SERVICE LAYER                  │
    │   auth · file · process · query · convo      │
+   │                + streaming_service            │
    └───────────┬─────────────────────────────────┘
                │
    ┌───────────┼──────────────────────────────────┐
@@ -134,6 +135,25 @@ QUERY (per question, ~2-5s)
                             │
                             ▼
                      Answer + [Source N] citations
+
+
+STREAMING CHAT (per question, streamed via SSE)
+════════════════════════════════════════════════
+
+  Question ──▶ Load conversation history from DB
+                      │
+                      ▼
+               Same RAG retrieval as above (MMR → resolve originals)
+                      │
+                      ▼
+               build_prompt() with context + history
+                      │
+                      ▼
+               llm.astream() ──▶ token-by-token SSE
+                      │
+                      ▼
+               {"type":"delta"} → {"type":"complete"}
+               + save assistant message with sources to DB
 ```
 
 ---
@@ -311,6 +331,43 @@ Route handler
 </details>
 
 <details>
+<summary><strong>Streaming Chat: Token-by-Token RAG over SSE</strong></summary>
+
+<br>
+
+> **TL;DR:** `POST /conversations/{id}/ask` streams the RAG response token-by-token via SSE instead of returning a buffered JSON response. Retrieval happens first (non-streamed), then the LLM answer streams — giving a ChatGPT-like experience where text appears as it's generated. Messages and sources are persisted to the conversation.
+
+```
+POST /conversations/{id}/ask  {question}
+         ↓
+  1. Validate conversation ownership
+  2. Load chat history from DB
+  3. Save user message
+  4. Retrieve context (MMR, same as /query/ask)
+  5. Build prompt (context + history + question)
+  6. llm.astream() → yield tokens as SSE
+  7. Save assistant message + sources to DB
+  8. Send complete event
+```
+
+**Key design choices:**
+
+- **Retrieval is not streamed** — vector search + docstore lookup happen first in one pass. Only the LLM generation is streamed, since that's the slow part (3-5s).
+- **Same RAG chain as `/query/ask`** — reuses `build_prompt`, `resolve_originals`, `parse_docs`. No separate pipeline to maintain.
+- **Conversation is required** — the frontend creates a conversation first via `POST /conversations`, then sends questions. No separate streaming endpoint to maintain.
+- **Sources in completion** — the `complete` event includes the full source list, so the frontend can render source cards after the stream finishes.
+
+**SSE protocol:**
+
+```json
+{"type": "delta", "content": "partial token"}
+{"type": "complete", "content": "full response", "conversation_id": "uuid", "sources": [...]}
+{"type": "error", "content": "error message"}
+```
+
+</details>
+
+<details>
 <summary><strong>Performance Optimizations</strong></summary>
 
 <br>
@@ -350,7 +407,7 @@ Route handler
 | `POST` | `/query/ask/stream` | ✓ | Streaming RAG query via Server-Sent Events. |
 | `POST` | `/conversations` | ✓ | Create a conversation. |
 | `GET` | `/conversations` | ✓ | List your conversations. |
-| `POST` | `/conversations/{id}/ask` | ✓ | Ask with DB-backed conversation history auto-injected. |
+| `POST` | `/conversations/{id}/ask` | ✓ | **Streaming** — ask with history, response streamed token-by-token via SSE. |
 | `GET` | `/conversations/{id}/messages` | ✓ | Retrieve message history with per-message sources. |
 | `DELETE` | `/conversations/{id}` | ✓ | Soft-delete a conversation. |
 
@@ -447,7 +504,9 @@ CONV_ID=$(curl -s -X POST http://localhost:8000/conversations \
   -H "Content-Type: application/json" -d '{}' \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
 
-curl -X POST http://localhost:8000/conversations/$CONV_ID/ask \
+# Response streams token-by-token via SSE:
+#   {"type":"delta","content":"..."} ... {"type":"complete","content":"...","sources":[...]}
+curl -N -X POST http://localhost:8000/conversations/$CONV_ID/ask \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"question": "Summarise the methodology section."}'
@@ -499,7 +558,7 @@ curl -X POST http://localhost:8000/conversations/$CONV_ID/ask \
     │   ├── file_routes.py          # /files (list), /upload, /delete
     │   ├── process_routes.py       # /files/process/{id}, /status/{id}
     │   ├── query_routes.py         # /query/ask, /query/ask/stream (SSE)
-    │   └── conversation_routes.py  # /conversations CRUD + /ask
+    │   └── conversation_routes.py  # /conversations CRUD + /ask (streaming SSE)
     └── services/
         ├── auth_service.py         # bcrypt hashing, JWT issue/verify
         ├── document_service.py     # DB queries for document listing (user-scoped)
@@ -513,7 +572,8 @@ curl -X POST http://localhost:8000/conversations/$CONV_ID/ask \
         ├── retrieval_service.py    # MMR retriever, user-scoped, add_documents
         ├── vector_service.py       # Chroma singleton + SQLite DocStore (WAL, batch)
         ├── query_service.py        # ask_with_sources (single-retrieval chain)
-        └── conversation_service.py # Message CRUD, 20-msg window, source tracking
+        ├── conversation_service.py # Message CRUD, 20-msg window, source tracking
+        └── streaming_service.py    # Token-by-token SSE streaming for conversation /ask
 ```
 
 ---

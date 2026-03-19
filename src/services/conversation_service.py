@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 from src.core.exceptions import DocumentNotFoundError
 from src.models.conversation import Conversation
 from src.models.message import Message, MessageRole
-from src.services.query_service import query_service
 
 logger = logging.getLogger(__name__)
 
@@ -134,50 +133,6 @@ class ConversationService:
             }
             for m in messages
         ]
-
-
-    def ask(
-        self,
-        db: Session,
-        conversation_id: str,
-        question: str,
-        user_id: str,
-    ) -> Dict[str, Any]:
-        """Ask a question within a conversation, preserving chat history.
-
-        1. Load previous messages as chat history
-        2. Save the user message
-        3. Run RAG query with history injected
-        4. Save the assistant message with sources
-        5. Return the answer
-        """
-        history = self.get_history(db, conversation_id, user_id=user_id)
-
-        self.add_message(db, conversation_id, MessageRole.USER, question, user_id=user_id)
-
-        result = query_service.ask_with_sources(
-            question, chat_history=history, user_id=user_id
-        )
-
-        self.add_message(
-            db,
-            conversation_id,
-            MessageRole.ASSISTANT,
-            result["answer"],
-            user_id=user_id,
-            sources=result["sources"],
-        )
-
-        logger.info(
-            "Conversation %s: answered with %d sources",
-            conversation_id, len(result["sources"]),
-        )
-
-        return {
-            "conversation_id": conversation_id,
-            "answer": result["answer"],
-            "sources": result["sources"],
-        }
 
 
 conversation_service = ConversationService()

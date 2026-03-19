@@ -19,7 +19,13 @@ Core business logic for the AI Document Companion RAG pipeline.
 │   ┌─────────────────┐     │  ┌─────────────────┐  ┌─────────────────┐   │
 │   │  query_service  │◀────┼──│retrieval_service│◀─│  vector_service │   │
 │   │    (RAG Q&A)    │     │  │ (Multi-Vector)  │  │ (ChromaDB/Store)│   │
-│   └─────────────────┘     │  └─────────────────┘  └─────────────────┘   │
+│   └────────┬────────┘     │  └─────────────────┘  └─────────────────┘   │
+│            │               │                                             │
+│            ▼               │                                             │
+│   ┌─────────────────┐     │                                             │
+│   │streaming_service│     │                                             │
+│   │(Streaming + Conv)│     │                                             │
+│   └─────────────────┘     │                                             │
 │           │               │           ▲                    ▲             │
 │           │               │           │                    │             │
 │           ▼               │  ┌─────────────────┐  ┌─────────────────┐   │
@@ -44,6 +50,7 @@ Core business logic for the AI Document Companion RAG pipeline.
 | **LLMService** | `llm_service.py` | Chains for summarization (Deepseek) and vision (Llava) |
 | **ChunkService** | `chunk_service.py` | Separate elements by type; extract base64 images |
 | **UnstructuredService** | `unstructured_service.py` | PDF parsing with hi_res strategy |
+| **StreamingService** | `streaming_service.py` | Token-by-token SSE streaming for conversation /ask |
 
 ## Document Processing Flow
 
@@ -89,6 +96,26 @@ query_service.ask(question)
 │   └── Fetch originals from docstore by doc_id
 ├── llm_service.get_rag_chain()
 └── Generate answer with Deepseek-R1
+```
+
+## Streaming Chat Flow
+
+```
+POST /conversations/{id}/ask {"question": "..."}
+
+streaming_service.stream_chat_response()
+├── Validate conversation ownership
+├── Load chat history from DB (last 20 messages)
+├── Save user message
+├── Retrieve context (same RAG pipeline as /query/ask)
+│   ├── retriever → MMR search (fetch 20, return 5)
+│   ├── resolve_originals() → swap summaries for originals
+│   └── parse_docs() → separate images from text
+├── Build prompt (context + history + question)
+├── llm.astream(messages) → stream tokens as SSE
+│   └── yield {"type": "delta", "content": "..."} per token
+├── Save assistant message + sources to DB
+└── yield {"type": "complete", "content": "...", "sources": [...]}
 ```
 
 ## Status Tracking

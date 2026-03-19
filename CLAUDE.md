@@ -60,11 +60,12 @@ src/
 - **Exception hierarchy:** Each error subclass in `src/exceptions/` declares its own `status_code` attribute — no lookup table. Global handler in `src/main.py` reads it directly.
 - **Async ingestion:** `BackgroundTasks.add_task()` for non-blocking document processing. Status tracked via JSON files in `uploads/status/{file_id}.json`.
 - **Conversation memory:** DB-backed (not LangChain's `RunnableWithMessageHistory`). 20-message sliding window injected into RAG prompt. Sources stored per assistant message.
+- **Streaming conversation responses:** `POST /conversations/{id}/ask` streams tokens via SSE using `streaming_service.py`. Retrieval is non-streamed; only LLM generation is streamed via `llm.astream()`.
 
 ### RAG Pipeline Flow
 
 1. **Ingest:** `partition()` → `chunk_by_title()` → separate text/tables/images → LLM summarize each (max_concurrency=3) → embed summaries in Chroma + store originals in docstore
-2. **Query:** User question → similarity search on summary vectors (K=5) → retrieve originals from docstore → build prompt with context + chat history → invoke LLM → return answer with sources
+2. **Query:** User question → similarity search on summary vectors (K=5) → retrieve originals from docstore → build prompt with context + chat history → stream LLM response token-by-token via SSE
 
 ### Auth Flow
 

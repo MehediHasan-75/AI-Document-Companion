@@ -17,7 +17,11 @@ from src.config.constants import (
     VISION_MODEL,
     VISION_TEMPERATURE,
 )
-from src.config.prompts import TEXT_TABLE_SUMMARIZATION_PROMPT, IMAGE_SUMMARIZATION_PROMPT
+from src.config.prompts import (
+    IMAGE_SUMMARIZATION_PROMPT,
+    SUMMARIZATION_SYSTEM_PROMPT,
+    TEXT_TABLE_SUMMARIZATION_PROMPT,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -63,15 +67,19 @@ def _get_vision_llm() -> ChatOllama:
 
 def get_text_table_summarizer() -> Any:
     """Create a chain for summarizing text and tables."""
-    prompt = ChatPromptTemplate.from_template(TEXT_TABLE_SUMMARIZATION_PROMPT)
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", SUMMARIZATION_SYSTEM_PROMPT),
+        ("human", TEXT_TABLE_SUMMARIZATION_PROMPT),
+    ])
     return {"element": lambda x: x} | prompt | get_text_llm() | StrOutputParser()
 
 
 def get_image_summarizer() -> Any:
     """Create a chain for summarizing images using Llava."""
-    messages = [
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", SUMMARIZATION_SYSTEM_PROMPT),
         (
-            "user",
+            "human",
             [
                 {"type": "text", "text": IMAGE_SUMMARIZATION_PROMPT},
                 {
@@ -79,7 +87,6 @@ def get_image_summarizer() -> Any:
                     "image_url": {"url": "data:image/jpeg;base64,{image}"},
                 },
             ],
-        )
-    ]
-    prompt = ChatPromptTemplate.from_messages(messages)
+        ),
+    ])
     return prompt | _get_vision_llm() | StrOutputParser()

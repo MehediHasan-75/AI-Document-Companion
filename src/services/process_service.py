@@ -8,7 +8,8 @@ from pathlib import Path
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
 from src.core.exceptions import DocumentNotFoundError
-from src.models.document import DocumentStatus
+from src.db.session import SessionLocal
+from src.models.document import Document, DocumentStatus
 from src.services.file_service import file_service
 from src.services.ingestion_service import ingest_document_pipeline
 
@@ -63,16 +64,41 @@ class ProcessService:
             "status": DocumentStatus.UPLOADED.value,
         }
 
+    def _update_document_status(
+        self, file_id: str, status: DocumentStatus, error: Optional[str] = None
+    ) -> None:
+        """Update the Document row status using a standalone session."""
+        db = SessionLocal()
+        try:
+            doc = db.query(Document).filter(Document.id == file_id).first()
+            if doc:
+                if status == DocumentStatus.PROCESSED:
+                    doc.mark_processed()
+                elif status == DocumentStatus.FAILED:
+                    doc.mark_failed(error or "Unknown error")
+                elif status == DocumentStatus.PROCESSING:
+                    doc.mark_processing()
+                else:
+                    doc.status = status
+                db.commit()
+        except Exception:
+            logger.exception("Failed to update document status in DB for %s", file_id)
+            db.rollback()
+        finally:
+            db.close()
+
     def _run_pipeline(self, file_id: str, file_path: str, user_id: str) -> None:
         """Execute the ingestion pipeline, updating status on completion or failure."""
         logger.info("Starting pipeline for file %s (user %s)", file_id, user_id)
         try:
             ingest_document_pipeline(file_path, user_id=user_id)
             self._write_status(file_id, DocumentStatus.PROCESSED)
+            self._update_document_status(file_id, DocumentStatus.PROCESSED)
             logger.info("Pipeline completed successfully for %s", file_id)
         except Exception as exc:
             logger.exception("Pipeline failed for %s: %s", file_id, str(exc))
             self._write_status(file_id, DocumentStatus.FAILED, str(exc))
+            self._update_document_status(file_id, DocumentStatus.FAILED, str(exc))
 
     def process_file_async(
         self,
@@ -86,6 +112,7 @@ class ProcessService:
             raise DocumentNotFoundError(f"File with id '{file_id}' not found")
 
         self._write_status(file_id, DocumentStatus.PROCESSING)
+        self._update_document_status(file_id, DocumentStatus.PROCESSING)
         background_tasks.add_task(self._run_pipeline, file_id, str(file_path), user_id)
         logger.info("Async processing started for %s", file_id)
 

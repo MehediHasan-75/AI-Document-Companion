@@ -53,9 +53,20 @@ def list_files(
 )
 def upload_file(
     file: UploadFile = File(...),
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     file_id = file_service.save_upload(file)
+    file_path = file_service.get_file_path(file_id)
+    document_service.create_document(
+        db,
+        doc_id=file_id,
+        filename=file.filename or "unknown",
+        content_type=file.content_type or "application/octet-stream",
+        user_id=current_user.id,
+        file_path=str(file_path) if file_path else None,
+        file_size=file_path.stat().st_size if file_path else None,
+    )
     logger.info("File uploaded successfully: %s", file_id)
     return {"message": "File uploaded successfully", "file_id": file_id}
 
@@ -69,12 +80,23 @@ def upload_file(
 )
 def upload_multiple_files(
     files: List[UploadFile] = File(...),
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     results: List[Dict[str, Any]] = []
     for file in files:
         try:
             file_id = file_service.save_upload(file)
+            file_path = file_service.get_file_path(file_id)
+            document_service.create_document(
+                db,
+                doc_id=file_id,
+                filename=file.filename or "unknown",
+                content_type=file.content_type or "application/octet-stream",
+                user_id=current_user.id,
+                file_path=str(file_path) if file_path else None,
+                file_size=file_path.stat().st_size if file_path else None,
+            )
             results.append({"file_id": file_id})
         except AppError as exc:
             logger.warning("Failed to upload file %s: %s", file.filename, exc.message)

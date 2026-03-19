@@ -7,13 +7,40 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
-from src.models.document import Document, DocumentStatus
+from src.models.document import Document, DocumentStatus, DocumentType
 
 logger = logging.getLogger(__name__)
 
 
 class DocumentService:
     """Handles database queries for document metadata."""
+
+    def create_document(
+        self,
+        db: Session,
+        doc_id: str,
+        filename: str,
+        content_type: str,
+        user_id: str,
+        file_path: Optional[str] = None,
+        file_size: Optional[int] = None,
+    ) -> Document:
+        """Create a Document row after a successful file upload."""
+        doc = Document(
+            id=doc_id,
+            user_id=user_id,
+            filename=filename,
+            content_type=content_type,
+            doc_type=Document.get_doc_type(content_type),
+            file_path=file_path,
+            file_size=file_size,
+            status=DocumentStatus.UPLOADED,
+        )
+        db.add(doc)
+        db.commit()
+        db.refresh(doc)
+        logger.info("Document record created: %s for user %s", doc_id, user_id)
+        return doc
 
     def list_documents(
         self,

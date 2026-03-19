@@ -9,7 +9,7 @@ from langchain_core.vectorstores import VectorStoreRetriever
 
 from src.config.constants import DEFAULT_MAX_CONCURRENCY
 from src.services.unstructured_service import partition_document
-from src.services.chunk_service import separate_elements, get_images_base64
+from src.services.chunk_service import separate_elements, extract_images_base64
 from src.services.llm_service import get_text_table_summarizer, get_image_summarizer
 from src.services.vector_service import get_vectorstore, get_docstore, SimpleDocStore
 from src.services.retrieval_service import (
@@ -50,7 +50,7 @@ def ingest_document_pipeline(
     chunks = partition_document(file_path)
 
     texts, tables = separate_elements(chunks)
-    images = get_images_base64(chunks)
+    images = extract_images_base64(chunks)
     logger.info(
         "Extracted: %d texts, %d tables, %d images",
         len(texts),

@@ -15,7 +15,7 @@ router = APIRouter(prefix="/files", tags=["Processing"])
 
 
 @router.post("/process/{file_id}", summary="Process an uploaded file")
-async def process_file(
+def process_file(
     file_id: str,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
@@ -28,7 +28,7 @@ async def process_file(
 
 
 @router.get("/status/{file_id}", summary="Get processing status for a file")
-async def get_status(
+def get_status(
     file_id: str,
     current_user: User = Depends(get_current_user),
 ):

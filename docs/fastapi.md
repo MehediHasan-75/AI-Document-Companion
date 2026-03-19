@@ -285,7 +285,7 @@ app.include_router(index.router)
 
 ```python
 @router.post("/process/{file_id}")
-async def process_file(file_id: str, ...):
+def process_file(file_id: str, ...):
 ```
 
 The `{file_id}` in the URL path becomes a function parameter. FastAPI matches `/process/abc-123` and passes `"abc-123"` as `file_id`. The type hint `str` tells FastAPI to keep it as a string (if you wrote `file_id: int`, it would auto-convert and return 422 if the value isn't numeric).
@@ -294,7 +294,7 @@ The `{file_id}` in the URL path becomes a function parameter. FastAPI matches `/
 
 ```python
 @router.delete("/delete")
-async def delete_file(file_id: str, ...):
+def delete_file(file_id: str, ...):
 ```
 
 When a parameter isn't in the path and isn't a Pydantic model, FastAPI treats it as a **query parameter**. This endpoint expects `DELETE /files/delete?file_id=abc-123`.
@@ -530,7 +530,7 @@ Let's trace a real example — creating a conversation:
 **Route** (`src/routes/conversation_routes.py`):
 ```python
 @router.post("")
-async def create_conversation(
+def create_conversation(
     payload: CreateConversationRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -650,7 +650,7 @@ Key properties:
 
 ```python
 @router.post("/upload")
-async def upload_file(
+def upload_file(
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
 ):
@@ -739,7 +739,7 @@ Document ingestion (parsing, chunking, summarizing, vectorizing) takes minutes. 
 
 ```python
 @router.post("/process/{file_id}")
-async def process_file(
+def process_file(
     file_id: str,
     background_tasks: BackgroundTasks,    # FastAPI injects this automatically
     current_user: User = Depends(get_current_user),
@@ -901,41 +901,105 @@ This runs **once** when the server starts, before any request is handled. It:
 
 ---
 
-## Async vs Sync: When It Matters
+## Async vs Sync: The Most Important Performance Decision
 
-You'll notice something in this project — routes are `async def` but the underlying services are regular `def`:
+This section explains the single most impactful performance choice in a FastAPI application: whether your route handler is `async def` or `def`. Getting this wrong doesn't cause errors — it silently destroys your concurrency.
+
+### The Core Mechanism
+
+FastAPI (via Starlette) treats route handlers differently based on their signature:
+
+| Route Type | How FastAPI Runs It | Blocking I/O Inside? |
+|-----------|--------------------|--------------------|
+| `def` | Automatically in an **external thread pool** (`anyio.to_thread.run_sync`). Event loop stays free. | **Safe** — the thread blocks, not the loop. |
+| `async def` | **Directly on the event loop**. No thread pool. No safety net. | **Dangerous** — freezes the entire server. |
+
+```
+def route()       →  FastAPI wraps in threadpool  →  event loop stays free  ✅
+async def route() →  runs directly on event loop  →  blocks everything      ❌
+                                                     (if sync code inside)
+```
+
+**The counterintuitive truth:** `async def` with sync calls is *slower* than plain `def`, because `def` gets automatic threadpooling while `async def` with sync calls gets nothing.
+
+### Why This Project Uses `def` Routes
+
+All routes in this project use plain `def` because the entire service layer is synchronous — SQLAlchemy ORM queries, file I/O, LangChain chain invocations, and Ollama HTTP calls are all blocking operations. By using `def`, FastAPI automatically runs each request handler in its thread pool (default 40 threads), keeping the event loop free to accept new connections.
 
 ```python
-# Route: async
+# Route: sync — FastAPI auto-threadpools this ✅
 @router.post("/upload")
-async def upload_file(file: UploadFile = File(...), ...):
-    file_id = file_service.save_upload(file)   # calls sync code
+def upload_file(file: UploadFile = File(...), ...):
+    file_id = file_service.save_upload(file)   # blocking I/O, safe in thread
     return JSONResponse(...)
 
-# Service: sync
+# Service: sync (blocking I/O)
 def save_upload(self, file: UploadFile) -> str:
-    self._validate_file(file)                  # blocking I/O
-    # ... write file to disk ...
+    self._validate_file(file)        # blocking file seek/tell
+    with file_path.open("wb") as f:  # blocking disk write
+        while chunk := file.file.read(1024 * 1024):
+            f.write(chunk)
     return doc_id
 ```
 
-### How FastAPI Handles This
+The only `async def` in the project is middleware (`log_requests`) which correctly uses `await call_next(request)` — no blocking code.
 
-FastAPI handles both `async def` and regular `def` routes:
+### What Would Go Wrong with `async def`
 
-| Route Type | FastAPI Behavior |
-|-----------|-----------------|
-| `async def` | Runs directly on the event loop. If you call blocking code inside, **it blocks the entire server**. |
-| `def` | FastAPI automatically runs it in a **thread pool**, so blocking code doesn't freeze other requests. |
+If these routes were declared `async def` instead, the event loop would freeze during every blocking call:
 
-In this project, routes are declared as `async def` but call synchronous services (database queries via SQLAlchemy, file I/O). FastAPI doesn't automatically offload the *internal* blocking calls from an `async def` route — only entire `def` routes get the thread pool treatment.
+```
+                   ┌──────────────────────────────────────────┐
+                   │           uvicorn event loop              │
+                   │         (single Python thread)            │
+                   │                                           │
+ Request A ───────►│  async upload_file()                      │
+                   │    └── save_upload()  ← BLOCKS 500ms      │
+                   │                                           │
+ Request B ───────►│  (waiting... event loop is frozen)        │
+ Request C ───────►│  (waiting... event loop is frozen)        │
+                   │                                           │
+                   │  ── A finishes, B starts ──               │
+                   └───────────────────────────────────────────┘
+```
 
-**Why does this work anyway?** Because:
-- SQLAlchemy with SQLite using `StaticPool` is fast enough that the blocking is brief
-- File I/O with chunked reads is also quick
-- This is a single-user/low-traffic application
+With `def` routes, FastAPI offloads each request to its thread pool, so all three run concurrently:
 
-For high-concurrency production, you'd either use `def` routes (letting FastAPI's thread pool handle them) or use `async` SQLAlchemy with `asyncpg`.
+```
+                   ┌───────────────────────────────────────────┐
+                   │           uvicorn event loop               │
+                   │                                            │
+ Request A ───────►│  → threadpool → def upload_file()          │
+ Request B ───────►│  → threadpool → def ask()                  │
+ Request C ───────►│  → threadpool → def list_conversations()   │
+                   │                                            │
+                   │  ✓ Event loop stays free, all run in       │
+                   │    parallel across thread pool workers      │
+                   └────────────────────────────────────────────┘
+```
+
+### When to Use `async def` vs `def`
+
+| Situation | Use | Why |
+|-----------|-----|-----|
+| All I/O is sync (SQLAlchemy ORM, file ops, sync HTTP) | `def` | FastAPI auto-threadpools it. Zero effort. |
+| All I/O is async (`AsyncSession`, `aiofiles`, `httpx.AsyncClient`) | `async def` | True non-blocking concurrency on the event loop. |
+| Mix of async and sync I/O | `async def` + `run_in_threadpool` for sync parts | Keeps async benefits while safely offloading blocking calls. |
+| Middleware that calls `await call_next()` | `async def` | Must be async to participate in the ASGI chain. |
+| No I/O at all (pure computation, returning static data) | Either works | `async def` avoids thread pool overhead; `def` is fine too. |
+
+**Rule of thumb:** If you can't `await` every I/O call inside the function, use `def`.
+
+### Future Migration Path
+
+If this project eventually needs higher concurrency (hundreds of simultaneous users), the path is:
+
+1. **Async SQLAlchemy** — `AsyncSession` + `asyncpg` (PostgreSQL) or `aiosqlite` (SQLite)
+2. **Async file I/O** — `aiofiles` for disk operations
+3. **Async LangChain** — `.ainvoke()` instead of `.invoke()` for LLM calls
+4. **Convert routes to `async def`** — only after all underlying I/O is non-blocking
+
+Until then, `def` routes with the sync service layer is the correct and performant choice.
 
 ### The Event Loop: How `await` Actually Works
 

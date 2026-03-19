@@ -22,7 +22,7 @@ router = APIRouter(prefix="/files", tags=["Files"])
 
 
 @router.post("/upload", summary="Upload a single file")
-async def upload_file(
+def upload_file(
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
 ):
@@ -35,7 +35,7 @@ async def upload_file(
 
 
 @router.post("/upload/multiple", summary="Upload multiple files")
-async def upload_multiple_files(
+def upload_multiple_files(
     files: List[UploadFile] = File(...),
     current_user: User = Depends(get_current_user),
 ):
@@ -55,7 +55,7 @@ async def upload_multiple_files(
 
 
 @router.delete("/delete", summary="Delete a file by id")
-async def delete_file(
+def delete_file(
     file_id: str,
     current_user: User = Depends(get_current_user),
 ):

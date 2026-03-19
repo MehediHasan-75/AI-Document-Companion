@@ -13,7 +13,7 @@ router = APIRouter(prefix="/conversations", tags=["Conversations"])
 
 
 @router.post("", summary="Create a new conversation")
-async def create_conversation(
+def create_conversation(
     payload: CreateConversationRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -23,7 +23,7 @@ async def create_conversation(
 
 
 @router.get("", summary="List all conversations")
-async def list_conversations(
+def list_conversations(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -31,7 +31,7 @@ async def list_conversations(
 
 
 @router.get("/{conversation_id}/messages", summary="Get conversation messages")
-async def get_messages(
+def get_messages(
     conversation_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -40,7 +40,7 @@ async def get_messages(
 
 
 @router.post("/{conversation_id}/ask", summary="Ask a question within a conversation")
-async def ask_in_conversation(
+def ask_in_conversation(
     conversation_id: str,
     payload: ChatRequest,
     db: Session = Depends(get_db),
@@ -55,7 +55,7 @@ async def ask_in_conversation(
 
 
 @router.delete("/{conversation_id}", summary="Delete a conversation")
-async def delete_conversation(
+def delete_conversation(
     conversation_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),

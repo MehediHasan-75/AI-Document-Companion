@@ -13,7 +13,7 @@ router = APIRouter(prefix="/query", tags=["Query"])
 
 
 @router.post("/ask", summary="Ask a question over ingested documents")
-async def ask(
+def ask(
     payload: QueryRequest,
     current_user: User = Depends(get_current_user),
 ):

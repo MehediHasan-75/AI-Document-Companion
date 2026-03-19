@@ -840,6 +840,47 @@ In this project, routes are declared as `async def` but call synchronous service
 
 For high-concurrency production, you'd either use `def` routes (letting FastAPI's thread pool handle them) or use `async` SQLAlchemy with `asyncpg`.
 
+### The Event Loop: How `await` Actually Works
+
+Every `await` in FastAPI (or any asyncio Python code) follows the same pattern:
+
+```python
+response = await call_next(request)   # coroutine pauses HERE
+# ... resumes here when call_next finishes
+```
+
+1. The coroutine **pauses** at `await`
+2. **Control returns to the event loop**
+3. The event loop decides what to run next
+
+The event loop is a **single-threaded task manager** that juggles all your coroutines:
+
+```
+Event Loop (single thread)
+  │
+  ├── Request A middleware: paused at await call_next()
+  ├── Request B route: paused at await db.execute()
+  ├── Request C route: READY → run this one now
+  └── Request D middleware: paused at await redis.get()
+```
+
+It continuously cycles through all coroutines, running whichever ones are ready and parking the ones that are waiting for I/O.
+
+**How different `await` targets are handled:**
+
+| What you `await` | What happens under the hood |
+|-------------------|---------------------------|
+| I/O (DB query, HTTP call, file read) | Event loop asks the OS to notify when I/O completes. Meanwhile, runs other coroutines. |
+| `asyncio.sleep()` | Event loop sets a timer, runs other coroutines until timer fires. |
+| Thread pool task (`run_in_executor`) | Work runs on a separate thread. Event loop checks when the thread finishes. |
+| Another coroutine | That coroutine runs until it hits its own `await`, then control bounces back. |
+
+**The critical insight:** `await` does **not** create a new thread. The event loop runs on a single thread and handles concurrency by rapidly switching between coroutines at their `await` points. This is why FastAPI can handle thousands of concurrent requests without thousands of threads — as long as you're doing I/O, not CPU work.
+
+**Analogy:** The event loop is a chef with many pots on the stove. When pot A is simmering (`await`), the chef stirs pot B. When pot B needs to bake (`await`), the chef checks if pot A is done. One chef, many dishes, no idle time — but if the chef has to hand-knead dough (CPU-bound blocking), every other pot burns.
+
+That's exactly why calling sync/blocking code inside `async def` is dangerous — it's the dough-kneading problem. The single-threaded event loop can't switch to other requests while your blocking code runs.
+
 ---
 
 ## API Documentation: Free Swagger UI

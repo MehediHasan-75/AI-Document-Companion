@@ -6,19 +6,39 @@ Defines file upload and deletion endpoints.
 """
 
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, Depends, File, Query, UploadFile
+from sqlalchemy.orm import Session
 
 from src.core.exceptions import AppError
 from src.dependencies.auth import get_current_user
+from src.dependencies.db import get_db
 from src.models.user import User
-from src.schemas.file import FileDeleteResponse, FileUploadResponse, MultiFileUploadResponse
+from src.schemas.file import FileDeleteResponse, FileListResponse, FileUploadResponse, MultiFileUploadResponse
+from src.services.document_service import document_service
 from src.services.file_service import file_service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/files", tags=["Files"])
+
+
+@router.get(
+    "",
+    response_model=FileListResponse,
+    summary="List all uploaded files",
+    responses={401: {"description": "Invalid or expired token"}},
+)
+def list_files(
+    page: Optional[int] = Query(None, ge=1, description="Page number (1-based)"),
+    limit: Optional[int] = Query(None, ge=1, le=100, description="Items per page"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return document_service.list_documents(
+        db, user_id=current_user.id, page=page, limit=limit
+    )
 
 
 @router.post(

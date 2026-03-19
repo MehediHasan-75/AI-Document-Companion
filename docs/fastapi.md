@@ -1092,6 +1092,7 @@ Visit `http://localhost:8000/docs` in your browser. You'll see:
 
 | Method | Path | Auth | Request | Response | Status |
 |--------|------|------|---------|----------|--------|
+| GET | `/files` | Yes | Optional query params: `page`, `limit` | `{files[], total, page, limit}` | 200 |
 | POST | `/files/upload` | Yes | `multipart/form-data` (single file) | `{message, file_id}` | 201 |
 | POST | `/files/upload/multiple` | Yes | `multipart/form-data` (multiple files) | `{message, files[]}` | 201 |
 | DELETE | `/files/delete?file_id=...` | Yes | Query param: `file_id` | `{message, file_id}` | 200 |

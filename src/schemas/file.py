@@ -31,3 +31,18 @@ class ProcessingStatusResponse(BaseModel):
     status: str
     progress: Optional[float] = None
     error: Optional[str] = None
+
+
+class FileItem(BaseModel):
+    id: str
+    filename: str
+    status: str
+    created_at: str
+    type: str
+
+
+class FileListResponse(BaseModel):
+    files: List[FileItem]
+    total: int
+    page: int
+    limit: int

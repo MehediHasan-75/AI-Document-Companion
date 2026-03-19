@@ -340,6 +340,7 @@ Route handler
 | `POST` | `/auth/register` | — | Register. Returns user profile. |
 | `POST` | `/auth/login` | — | Login (form: `username`, `password`). Returns JWT. |
 | `GET` | `/auth/me` | ✓ | Current authenticated user. |
+| `GET` | `/files` | ✓ | List all uploaded files (supports `?page=&limit=`). |
 | `POST` | `/files/upload` | ✓ | Upload a single document. Returns `file_id`. |
 | `POST` | `/files/upload/multiple` | ✓ | Batch upload. Returns per-file results. |
 | `POST` | `/files/process/{file_id}` | ✓ | Trigger async ingestion pipeline (user-scoped). |
@@ -489,17 +490,19 @@ curl -X POST http://localhost:8000/conversations/$CONV_ID/ask \
     │   └── message.py              # Message (role enum, content, sources JSON)
     ├── schemas/
     │   ├── auth.py                 # RegisterRequest, TokenResponse, UserResponse
+    │   ├── file.py                  # FileUploadResponse, FileListResponse, FileItem
     │   ├── query.py                # QueryRequest (max 2000 chars, optional history)
     │   └── conversation.py         # ChatRequest (max 2000 chars)
     ├── routes/
     │   ├── index.py                # Single aggregation point for all routers
     │   ├── auth_routes.py          # /auth/register, /login, /me
-    │   ├── file_routes.py          # /files/upload, /delete
+    │   ├── file_routes.py          # /files (list), /upload, /delete
     │   ├── process_routes.py       # /files/process/{id}, /status/{id}
     │   ├── query_routes.py         # /query/ask, /query/ask/stream (SSE)
     │   └── conversation_routes.py  # /conversations CRUD + /ask
     └── services/
         ├── auth_service.py         # bcrypt hashing, JWT issue/verify
+        ├── document_service.py     # DB queries for document listing (user-scoped)
         ├── file_service.py         # MIME + size validation, chunked streaming write
         ├── process_service.py      # BackgroundTasks dispatch, JSON status files
         ├── ingestion_service.py    # partition → summarise → dual-store index

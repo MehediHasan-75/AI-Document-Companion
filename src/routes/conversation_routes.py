@@ -6,13 +6,24 @@ from sqlalchemy.orm import Session
 from src.dependencies.auth import get_current_user
 from src.dependencies.db import get_db
 from src.models.user import User
-from src.schemas.conversation import ChatRequest, CreateConversationRequest
+from src.schemas.conversation import (
+    ChatRequest,
+    ConversationResponse,
+    CreateConversationRequest,
+    DeleteConversationResponse,
+)
 from src.services.conversation_service import conversation_service
 
 router = APIRouter(prefix="/conversations", tags=["Conversations"])
 
 
-@router.post("", summary="Create a new conversation")
+@router.post(
+    "",
+    response_model=ConversationResponse,
+    status_code=201,
+    summary="Create a new conversation",
+    responses={401: {"description": "Invalid or expired token"}},
+)
 def create_conversation(
     payload: CreateConversationRequest,
     db: Session = Depends(get_db),
@@ -22,7 +33,11 @@ def create_conversation(
     return {"id": conv.id, "title": conv.title, "created_at": conv.created_at.isoformat()}
 
 
-@router.get("", summary="List all conversations")
+@router.get(
+    "",
+    summary="List all conversations",
+    responses={401: {"description": "Invalid or expired token"}},
+)
 def list_conversations(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -30,7 +45,14 @@ def list_conversations(
     return conversation_service.list_conversations(db, user_id=current_user.id)
 
 
-@router.get("/{conversation_id}/messages", summary="Get conversation messages")
+@router.get(
+    "/{conversation_id}/messages",
+    summary="Get conversation messages",
+    responses={
+        401: {"description": "Invalid or expired token"},
+        404: {"description": "Conversation not found"},
+    },
+)
 def get_messages(
     conversation_id: str,
     db: Session = Depends(get_db),
@@ -39,7 +61,15 @@ def get_messages(
     return conversation_service.get_messages(db, conversation_id, user_id=current_user.id)
 
 
-@router.post("/{conversation_id}/ask", summary="Ask a question within a conversation")
+@router.post(
+    "/{conversation_id}/ask",
+    summary="Ask a question within a conversation",
+    responses={
+        401: {"description": "Invalid or expired token"},
+        404: {"description": "Conversation not found"},
+        422: {"description": "Query failed"},
+    },
+)
 def ask_in_conversation(
     conversation_id: str,
     payload: ChatRequest,
@@ -54,7 +84,15 @@ def ask_in_conversation(
     return conversation_service.ask(db, conversation_id, payload.question, user_id=current_user.id)
 
 
-@router.delete("/{conversation_id}", summary="Delete a conversation")
+@router.delete(
+    "/{conversation_id}",
+    response_model=DeleteConversationResponse,
+    summary="Delete a conversation",
+    responses={
+        401: {"description": "Invalid or expired token"},
+        404: {"description": "Conversation not found"},
+    },
+)
 def delete_conversation(
     conversation_id: str,
     db: Session = Depends(get_db),

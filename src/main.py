@@ -21,7 +21,10 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="AI Document Companion API",
     version="1.0.0",
-    description="API for managing files",
+    description=(
+        "Multimodal RAG pipeline API — ingest documents (PDF, DOCX, PPTX, XLSX, CSV, TXT, MD, HTML, JSON), "
+        "create vector embeddings, and perform conversational Q&A with persistent chat history."
+    ),
 )
 
 # ── Middleware ────────────────────────────────────────────────────────────────
@@ -72,6 +75,12 @@ app.include_router(index.router)
 @app.on_event("startup")
 async def on_startup():
     if settings.SECRET_KEY == "change-this-to-a-long-random-secret-in-production":
+        if not settings.DEBUG:
+            raise RuntimeError(
+                "SECRET_KEY is the insecure default. "
+                "Set a strong random secret in .env before running in production "
+                "(openssl rand -hex 32)."
+            )
         logger.warning(
             "SECRET_KEY is the insecure default — set a strong random secret "
             "in .env before deploying to production (openssl rand -hex 32)"

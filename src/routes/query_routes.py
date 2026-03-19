@@ -16,7 +16,14 @@ from src.services.vector_service import get_vectorstore
 router = APIRouter(prefix="/query", tags=["Query"])
 
 
-@router.post("/ask", summary="Ask a question over ingested documents")
+@router.post(
+    "/ask",
+    summary="Ask a question over ingested documents",
+    responses={
+        401: {"description": "Invalid or expired token"},
+        422: {"description": "Query failed"},
+    },
+)
 def ask(
     payload: QueryRequest,
     current_user: User = Depends(get_current_user),
@@ -31,7 +38,14 @@ def ask(
     )
 
 
-@router.post("/ask/stream", summary="Ask a question with streaming response")
+@router.post(
+    "/ask/stream",
+    summary="Ask a question with streaming response",
+    responses={
+        401: {"description": "Invalid or expired token"},
+        422: {"description": "Query failed"},
+    },
+)
 async def ask_stream(
     payload: QueryRequest,
     current_user: User = Depends(get_current_user),

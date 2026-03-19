@@ -593,7 +593,58 @@ Routes import these singletons directly. There's no per-request instantiation. T
 
 ## File Uploads: Handling Binary Data
 
-File uploads use FastAPI's `UploadFile` — a wrapper around the raw file stream that provides metadata and efficient reading.
+File uploads use FastAPI's `UploadFile` — a wrapper around a file stream that provides metadata and efficient reading.
+
+### The Upload Journey: Where Does the File Live?
+
+When a user uploads a file, it doesn't teleport directly into your code. Here's what actually happens:
+
+```
+Browser                          Server
+   │                                │
+   │  POST multipart/form-data      │
+   │ ─────────────────────────────> │
+   │   (bytes stream over HTTP)     │
+   │                                │
+   │                     ┌──────────▼──────────┐
+   │                     │  SpooledTemporaryFile │
+   │                     │  ├─ Small → RAM       │
+   │                     │  └─ Large → /tmp disk │
+   │                     └──────────┬──────────┘
+   │                                │
+   │                     ┌──────────▼──────────┐
+   │                     │  file.file (stream)  │
+   │                     │  Your code reads it   │
+   │                     └─────────────────────┘
+```
+
+1. Browser sends the file as a stream of bytes over HTTP (`multipart/form-data`)
+2. FastAPI/Starlette receives the bytes and stores them in a **`SpooledTemporaryFile`**:
+   - **Small files** (under a threshold) → held in **RAM** for speed
+   - **Large files** (over the threshold) → automatically spilled to a **temp file on disk** (e.g., `/tmp/`)
+3. You access it via `file.file` — a **stream object** (like Python's `open()`)
+
+You don't manage any of this. FastAPI handles the spooling, and temp files are cleaned up automatically when the request ends.
+
+### What "Stream" Means
+
+A stream is a way to read data **progressively**, not all at once. Think of it as water through a pipe vs a full bucket dumped on you.
+
+`file.file` is a file-like stream object with a **read cursor** that tracks your position:
+
+```python
+file.file.read(1024)   # Read next 1KB, cursor moves forward
+file.file.read(1024)   # Read the NEXT 1KB (not the same one)
+file.file.read()       # Read everything remaining — cursor at end
+file.file.seek(0)      # Reset cursor to beginning
+```
+
+Key properties:
+- Does **not** load the full file into memory
+- Reads data **sequentially** from the current cursor position
+- Returns empty `bytes` (`b""`) when you reach the end (EOF)
+
+**The danger:** Calling `file.file.read()` with no size argument loads the **entire file** into RAM. For a 50MB PDF, that's 50MB of memory per concurrent upload. Always read in chunks for production code.
 
 ### How UploadFile Works
 
@@ -613,11 +664,11 @@ An `UploadFile` object gives you:
 |-----------|-----------|
 | `file.filename` | Original filename from the client (e.g., `"report.pdf"`) |
 | `file.content_type` | MIME type (e.g., `"application/pdf"`) |
-| `file.file` | The underlying file-like object (SpooledTemporaryFile) |
+| `file.file` | The underlying stream (`SpooledTemporaryFile`) |
 
 ### Chunked Writing
 
-The file service doesn't read the entire file into memory at once:
+The file service reads the stream in fixed-size chunks to keep memory usage constant:
 
 ```python
 FILE_WRITE_CHUNK_SIZE = 1024 * 1024  # 1 MB
@@ -627,9 +678,21 @@ with file_path.open("wb") as buffer:
         buffer.write(chunk)
 ```
 
-**Why chunked?** A user could upload a 50MB PDF. Reading 50MB into memory at once (with `file.file.read()`) would spike your server's RAM. Reading 1MB at a time keeps memory usage constant regardless of file size.
+**Why chunked?** A 50MB upload read with `file.file.read()` (no argument) loads 50MB into RAM. Reading 1MB at a time keeps memory usage at ~1MB regardless of file size — even for gigabyte files.
 
-**The walrus operator (`:=`)** assigns and checks in one expression. `chunk := file.file.read(...)` reads a chunk, assigns it to `chunk`, and the `while` loop continues until `read()` returns an empty `bytes` object (meaning end of file).
+**The walrus operator (`:=`)** assigns and checks in one expression. `chunk := file.file.read(...)` reads a chunk, assigns it to `chunk`, and the `while` loop continues until `read()` returns empty bytes (EOF).
+
+**Comparison:**
+
+```python
+# Bad — loads entire file into memory
+data = file.file.read()          # 50MB file = 50MB RAM spike
+buffer.write(data)
+
+# Good — constant memory regardless of file size
+while chunk := file.file.read(1_048_576):   # Always ~1MB in memory
+    buffer.write(chunk)
+```
 
 ### Validation Before Writing
 
@@ -642,16 +705,16 @@ def _validate_file(self, file: UploadFile) -> None:
         raise FileValidationError(f"File type {file.content_type} is not allowed")
 
     # Check file size without reading content into memory
-    file.file.seek(0, os.SEEK_END)     # Jump to end of file
-    file_size = file.file.tell()        # Current position = total size
-    file.file.seek(0)                   # Reset to beginning for later reading
+    file.file.seek(0, os.SEEK_END)     # Jump cursor to end of stream
+    file_size = file.file.tell()        # Current position = total size in bytes
+    file.file.seek(0)                   # Reset cursor to beginning for later reading
 
     max_size_bytes = max_size_mb * 1024 * 1024
     if file_size > max_size_bytes:
         raise FileValidationError(f"File exceeds maximum size of {max_size_mb} MB")
 ```
 
-**The seek/tell trick:** Instead of reading the entire file to count bytes, we jump the cursor to the end (`seek(0, SEEK_END)`), check the position (`tell()`), and jump back (`seek(0)`). This gives us the file size in three calls, with zero memory overhead.
+**The seek/tell trick:** Instead of reading the file to count bytes, we jump the cursor to the end (`seek(0, SEEK_END)`), check the position (`tell()`), and jump back (`seek(0)`). Three calls, zero memory overhead. This works because the `SpooledTemporaryFile` knows its total size even when the data is on disk.
 
 ### Cleanup on Failure
 

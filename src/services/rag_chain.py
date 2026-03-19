@@ -35,8 +35,9 @@ def resolve_originals(docs: List[Document]) -> List[Document]:
         doc_id = doc.metadata.get(DEFAULT_ID_KEY)
         original = lookup.get(doc_id) if doc_id else None
         if original:
+            metadata = {**doc.metadata, "summary": doc.page_content}
             resolved.append(
-                Document(page_content=original, metadata=doc.metadata)
+                Document(page_content=original, metadata=metadata)
             )
         else:
             resolved.append(doc)

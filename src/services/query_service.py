@@ -47,13 +47,15 @@ class QueryService:
         # Sources come from the same retrieval the LLM used — no second round-trip
         sources: List[Dict[str, Any]] = []
         for doc in result["context"].get("texts", []):
-            doc_id = doc.metadata.get(id_key) if hasattr(doc, "metadata") else None
-            original = docstore.get(doc_id) if doc_id else None
+            metadata = doc.metadata if hasattr(doc, "metadata") else {}
+            doc_id = metadata.get(id_key)
+            summary = metadata.get("summary", doc.page_content if hasattr(doc, "page_content") else str(doc))
+            original = doc.page_content if hasattr(doc, "page_content") else str(doc)
             sources.append(
                 {
-                    "summary": doc.page_content if hasattr(doc, "page_content") else str(doc),
+                    "summary": summary,
                     "original": original,
-                    "type": doc.metadata.get("type", "text") if hasattr(doc, "metadata") else "text",
+                    "type": metadata.get("type", "text"),
                     "doc_id": doc_id,
                 }
             )

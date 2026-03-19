@@ -915,8 +915,8 @@ FastAPI (via Starlette) treats route handlers differently based on their signatu
 | `async def` | **Directly on the event loop**. No thread pool. No safety net. | **Dangerous** — freezes the entire server. |
 
 ```
-def route()       →  FastAPI wraps in threadpool  →  event loop stays free  ✅
-async def route() →  runs directly on event loop  →  blocks everything      ❌
+def route()       →  FastAPI wraps in threadpool  →  event loop stays free  
+async def route() →  runs directly on event loop  →  blocks everything      
                                                      (if sync code inside)
 ```
 
@@ -927,7 +927,7 @@ async def route() →  runs directly on event loop  →  blocks everything      
 All routes in this project use plain `def` because the entire service layer is synchronous — SQLAlchemy ORM queries, file I/O, LangChain chain invocations, and Ollama HTTP calls are all blocking operations. By using `def`, FastAPI automatically runs each request handler in its thread pool (default 40 threads), keeping the event loop free to accept new connections.
 
 ```python
-# Route: sync — FastAPI auto-threadpools this ✅
+# Route: sync — FastAPI auto-threadpools this 
 @router.post("/upload")
 def upload_file(file: UploadFile = File(...), ...):
     file_id = file_service.save_upload(file)   # blocking I/O, safe in thread

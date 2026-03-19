@@ -4,10 +4,10 @@ Query routes for RAG question answering.
 
 from fastapi import APIRouter, Depends
 
-from src.controllers.query_controller import query_controller
 from src.dependencies.auth import get_current_user
 from src.models.user import User
 from src.schemas.query import QueryRequest
+from src.services.query_service import query_service
 
 router = APIRouter(prefix="/query", tags=["Query"])
 
@@ -20,4 +20,4 @@ async def ask(
     """
     Ask a question over the currently ingested documents.
     """
-    return query_controller.ask_with_sources(payload.question)
+    return query_service.ask_with_sources(payload.question)

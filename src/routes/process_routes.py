@@ -7,9 +7,9 @@ status for previously uploaded files.
 
 from fastapi import APIRouter, BackgroundTasks, Depends
 
-from src.controllers.process_controller import process_controller
 from src.dependencies.auth import get_current_user
 from src.models.user import User
+from src.services.process_service import process_service
 
 router = APIRouter(prefix="/files", tags=["Processing"])
 
@@ -24,7 +24,7 @@ async def process_file(
     Run the ingestion (RAG) pipeline for the given ``file_id`` in the background.
     Returns immediately with status 'processing'. Poll /status/{file_id} for updates.
     """
-    return process_controller.process_file_async(file_id, background_tasks)
+    return process_service.process_file_async(file_id, background_tasks)
 
 
 @router.get("/status/{file_id}", summary="Get processing status for a file")
@@ -35,5 +35,5 @@ async def get_status(
     """
     Return the current processing status for the given ``file_id``.
     """
-    return process_controller.get_status(file_id)
+    return process_service.get_status(file_id)
 

@@ -1,6 +1,7 @@
 """Streaming RAG service.
 
-Streams LLM responses token-by-token via SSE with conversation persistence.
+Streams the full RAG pipeline via SSE using astream_events():
+  status events for each pipeline step, delta events for LLM tokens.
 """
 
 from __future__ import annotations
@@ -9,6 +10,7 @@ import json
 import logging
 from typing import Any, AsyncGenerator, Dict, List
 
+from langchain_core.runnables import RunnableLambda
 from langchain_ollama import ChatOllama
 from sqlalchemy.orm import Session
 
@@ -21,6 +23,16 @@ from src.services.retrieval_service import get_multi_vector_retriever
 from src.services.vector_service import get_vectorstore
 
 logger = logging.getLogger(__name__)
+
+_STEP_LABELS = {
+    "resolve_originals": "Resolving original content...",
+    "parse_docs": "Parsing document types...",
+    "build_prompt": "Building prompt...",
+}
+
+
+def _sse(data: dict) -> str:
+    return f"data: {json.dumps(data)}\n\n"
 
 
 def _extract_sources(context: Dict[str, List[Any]]) -> List[Dict[str, Any]]:
@@ -46,18 +58,17 @@ async def stream_chat_response(
     db: Session,
     conversation_id: str,
 ) -> AsyncGenerator[str, None]:
-    """Stream RAG response token-by-token as SSE events.
+    """Stream the full RAG pipeline as SSE events via astream_events().
 
     Protocol:
-      {"type": "delta", "content": "<token>"}      — each LLM token
+      {"type": "status", "content": "<step label>"}   — pipeline step started
+      {"type": "delta", "content": "<token>"}          — each LLM token
       {"type": "complete", "content": "<full>",
-       "conversation_id": "...", "sources": [...]}  — final message
-      {"type": "error", "content": "..."}           — on failure
+       "conversation_id": "...", "sources": [...]}     — final message
+      {"type": "error", "content": "..."}              — on failure
     """
-    # Validate conversation ownership
     conversation_service.get_conversation(db, conversation_id, user_id)
 
-    # Load chat history and save user message
     history = conversation_service.get_history(db, conversation_id, user_id)
     conversation_service.add_message(
         db, conversation_id, MessageRole.USER, question, user_id
@@ -67,51 +78,64 @@ async def stream_chat_response(
     sources: List[Dict[str, Any]] = []
 
     try:
-        # Step 1: Retrieve and process context (non-streaming)
         vectorstore = get_vectorstore()
         retriever, _ = get_multi_vector_retriever(vectorstore, user_id=user_id)
-        context = parse_docs(resolve_originals(retriever.invoke(question)))
-        sources = _extract_sources(context)
-
-        # Step 2: Build prompt with context + history
-        messages = build_prompt({
-            "context": context,
-            "question": question,
-            "chat_history": history,
-        })
-
-        # Step 3: Stream LLM response token-by-token
         llm = ChatOllama(
             model=settings.OLLAMA_MODEL,
             base_url=settings.OLLAMA_HOST,
             temperature=QA_TEMPERATURE,
         )
-        async for chunk in llm.astream(messages):
-            token = chunk.content if hasattr(chunk, "content") else str(chunk)
-            if token:
-                full_response += token
-                delta = json.dumps({"type": "delta", "content": token})
-                yield f"data: {delta}\n\n"
+
+        chain = (
+            retriever
+            | RunnableLambda(resolve_originals).with_config(run_name="resolve_originals")
+            | RunnableLambda(parse_docs).with_config(run_name="parse_docs")
+            | RunnableLambda(lambda ctx: build_prompt({
+                "context": ctx,
+                "question": question,
+                "chat_history": history,
+            })).with_config(run_name="build_prompt")
+            | llm
+        )
+
+        async for event in chain.astream_events(question, version="v2"):
+            kind = event["event"]
+            name = event.get("name", "")
+
+            if kind == "on_retriever_start":
+                yield _sse({"type": "status", "content": "Searching documents..."})
+
+            elif kind == "on_chain_start" and name in _STEP_LABELS:
+                yield _sse({"type": "status", "content": _STEP_LABELS[name]})
+
+            elif kind == "on_chat_model_start":
+                yield _sse({"type": "status", "content": "Generating response..."})
+
+            elif kind == "on_chat_model_stream":
+                token = event["data"]["chunk"].content
+                if token:
+                    full_response += token
+                    yield _sse({"type": "delta", "content": token})
+
+            elif kind == "on_chain_end" and name == "parse_docs":
+                sources = _extract_sources(event["data"]["output"])
 
     except Exception as e:
         logger.error("Streaming error: %s", e, exc_info=True)
         error_msg = str(e)
-        yield f"data: {json.dumps({'type': 'error', 'content': error_msg})}\n\n"
+        yield _sse({"type": "error", "content": error_msg})
         if not full_response:
             full_response = f"Error: {error_msg}"
 
-    # Save assistant response with sources
     if full_response:
         conversation_service.add_message(
             db, conversation_id, MessageRole.ASSISTANT, full_response,
             user_id, sources=sources,
         )
 
-    # Final completion event
-    complete = json.dumps({
+    yield _sse({
         "type": "complete",
         "content": full_response,
         "conversation_id": conversation_id,
         "sources": sources,
     })
-    yield f"data: {complete}\n\n"

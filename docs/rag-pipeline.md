@@ -741,50 +741,54 @@ The summary is good enough for **finding** the right chunk, but the original has
 
 **File:** `src/services/rag_chain.py` + `src/services/streaming_service.py`
 
-The retrieval and generation steps are plain sequential function calls — no LCEL chain wrappers needed since there's no batching, async streaming, or composition beyond a single sequential path:
+The full pipeline is composed as an LCEL chain in `streaming_service.py` and executed via `astream_events()`, which emits lifecycle events for every step — enabling status updates to the client at each stage, not just LLM tokens:
 
 ```python
-# In streaming_service.py — Step 1: retrieve and process context
-docs = retriever.invoke(question)
-context = parse_docs(resolve_originals(docs))
+chain = (
+    retriever
+    | RunnableLambda(resolve_originals).with_config(run_name="resolve_originals")
+    | RunnableLambda(parse_docs).with_config(run_name="parse_docs")
+    | RunnableLambda(lambda ctx: build_prompt({
+        "context": ctx,
+        "question": question,
+        "chat_history": history,
+    })).with_config(run_name="build_prompt")
+    | llm
+)
 
-# Step 2: build prompt
-messages = build_prompt({
-    "context": context,
-    "question": question,
-    "chat_history": history,
-})
-
-# Step 3: stream LLM response token-by-token
-async for chunk in llm.astream(messages):
-    yield token
+async for event in chain.astream_events(question, version="v2"):
+    if event["event"] == "on_retriever_start":
+        yield status("Searching documents...")
+    elif event["event"] == "on_chain_start" and event["name"] == "resolve_originals":
+        yield status("Resolving original content...")
+    elif event["event"] == "on_chat_model_stream":
+        yield delta(event["data"]["chunk"].content)
 ```
 
 Let's trace what happens for `"What were Q3 revenues?"`:
 
 ```
-Question ──▶ retriever.invoke()
+Question ──▶ retriever  ── on_retriever_start → status: "Searching documents..."
+                    │       on_retriever_end
+                    ▼
+             resolve_originals()  ── on_chain_start → status: "Resolving original content..."
+             (swap summaries for originals from docstore)
                     │
                     ▼
-             [Summary docs from Chroma MMR search]
+             parse_docs()  ── on_chain_start → status: "Parsing document types..."
+             (split into {"images": [...], "texts": [...]})
+             on_chain_end → capture sources
                     │
                     ▼
-             resolve_originals()  ← swap summary content for originals from docstore
+             build_prompt()  ── on_chain_start → status: "Building prompt..."
+             (context + history + question → List[BaseMessage])
                     │
                     ▼
-             [Original docs]
-                    │
-                    ▼
-             parse_docs()  ← split into {"images": [...], "texts": [...]}
-                    │
-                    ▼
-             build_prompt()  ← context + history + question → List[BaseMessage]
-                    │
-                    ▼
-             llm.astream()  ← token-by-token generation
+             llm  ── on_chat_model_start → status: "Generating response..."
+                      on_chat_model_stream → delta per token
 ```
 
-**Why plain function calls instead of an LCEL chain?** The `|` pipe operator adds value when you need LangChain features like `.batch()`, `.astream()` across the full chain, or composing with other runnables. Here we only stream the LLM step — retrieval is always a single synchronous call. Plain functions are simpler, easier to read, and have less overhead.
+**Why an LCEL chain with `astream_events()` here?** The chain lets us use `astream_events()`, which fires lifecycle events (`on_retriever_start`, `on_chain_start`, `on_chat_model_stream`, etc.) for every step automatically. This powers status events to the client at each pipeline stage — not just LLM tokens. Without a chain, you'd have to manually yield status events and separately call `llm.astream()`, losing the unified event model.
 
 ### `parse_docs`: Separating Images from Text
 
@@ -957,57 +961,46 @@ Note that images live in the **user message** (not the system message) because:
 
 **File:** `src/services/streaming_service.py`
 
-The `/conversations/{id}/ask` endpoint streams tokens via SSE as they're generated. Retrieval is non-streamed (happens first in one pass); only the LLM generation is streamed:
-
-```python
-# Step 1: retrieve context (non-streamed)
-docs = retriever.invoke(question)
-context = parse_docs(resolve_originals(docs))
-
-# Step 2: build prompt
-messages = build_prompt({"context": context, "question": question, "chat_history": history})
-
-# Step 3: stream LLM tokens
-async for chunk in llm.astream(messages):
-    token = chunk.content
-    yield f"data: {json.dumps({'type': 'delta', 'content': token})}\n\n"
-
-# Step 4: send completion event with sources
-yield f"data: {json.dumps({'type': 'complete', 'content': full_response, 'sources': sources})}\n\n"
-```
+The `/conversations/{id}/ask` endpoint streams the **full pipeline** via SSE using `astream_events()` — not just LLM tokens, but status updates for every pipeline step so the client can show progress as it happens:
 
 **How Server-Sent Events (SSE) work:**
 
 ```
-Client                                     Server
-  │                                          │
-  │  POST /query/ask/stream                  │
-  │ ────────────────────────────────────────▶│
-  │                                          │ (retrieval happens, prompt built)
-  │                                          │
-  │  data: According                         │
-  │ ◀────────────────────────────────────────│
-  │  data: to [Source 1],                    │
-  │ ◀────────────────────────────────────────│
-  │  data: Q3 revenues                       │
-  │ ◀────────────────────────────────────────│
-  │  data: were $4.2M...                     │
-  │ ◀────────────────────────────────────────│
-  │  data: [DONE]                            │
-  │ ◀────────────────────────────────────────│
-  │                                          │
-  │  Connection closed                       │
+Client                                        Server
+  │                                             │
+  │  POST /conversations/{id}/ask               │
+  │ ───────────────────────────────────────────▶│
+  │                                             │
+  │  data: {"type":"status","content":          │ ← retriever started
+  │          "Searching documents..."}          │
+  │ ◀───────────────────────────────────────────│
+  │  data: {"type":"status","content":          │ ← resolve_originals started
+  │          "Resolving original content..."}   │
+  │ ◀───────────────────────────────────────────│
+  │  data: {"type":"status","content":          │ ← build_prompt started
+  │          "Building prompt..."}              │
+  │ ◀───────────────────────────────────────────│
+  │  data: {"type":"status","content":          │ ← LLM started
+  │          "Generating response..."}          │
+  │ ◀───────────────────────────────────────────│
+  │  data: {"type":"delta","content":"Acc..."}  │ ← LLM token
+  │ ◀───────────────────────────────────────────│
+  │  data: {"type":"delta","content":"ording"}  │
+  │ ◀───────────────────────────────────────────│
+  │  data: {"type":"complete","content":"...",  │ ← done
+  │          "sources":[...]}                   │
+  │ ◀───────────────────────────────────────────│
 ```
 
-**Why streaming matters:** Without streaming, the user stares at a loading spinner for 3–5 seconds while the LLM generates the full response. With streaming, the first tokens appear almost instantly — the user starts reading while the LLM is still generating. Perceived latency drops from seconds to milliseconds.
+**Why streaming matters:** Without streaming, the user stares at a blank screen for 3–5 seconds. Status events show exactly which step is running, and tokens appear as the LLM generates them — perceived latency drops from seconds to milliseconds.
 
-**`chain.astream()`** is LangChain's async streaming method. The `a` prefix means "async" — it yields chunks on the event loop without blocking other requests.
+**`astream_events()`** fires lifecycle events for every step in the LCEL chain (`on_retriever_start`, `on_chain_start`, `on_chat_model_stream`, etc.). The `a` prefix means async — runs on the event loop without blocking other requests.
 
 ### Streaming Chat with Conversation Persistence
 
 **File:** `src/services/streaming_service.py`, `src/routes/conversation_routes.py`
 
-`POST /conversations/{id}/ask` streams the RAG response token-by-token via SSE — the same endpoint that previously returned a buffered JSON response. This gives a ChatGPT-like experience where tokens appear as they're generated.
+`POST /conversations/{id}/ask` streams the full RAG pipeline via SSE with conversation persistence — chat history is injected into the prompt and each assistant message is saved with its source chunks.
 
 **How it works:**
 
@@ -1020,37 +1013,32 @@ POST /conversations/{id}/ask  {"question": "..."}
          3. Save user message to DB
                     │
                     ▼
-         4. Retrieve context (same RAG pipeline)
-            retriever → resolve_originals → parse_docs
+         4. Build LCEL chain:
+            retriever → resolve_originals → parse_docs → build_prompt → llm
                     │
                     ▼
-         5. Build prompt (context + history + question)
+         5. chain.astream_events() →
+            status events per step + delta events per token
+            (sources captured from parse_docs on_chain_end event)
                     │
                     ▼
-         6. llm.astream(messages)  ← tokens streamed here
-                    │
-                    ▼
-         7. Save assistant message + sources to DB
+         6. Save assistant message + sources to DB
+         7. Send complete event
 ```
-
-**Key difference from `/query/ask/stream`:** The basic streaming endpoint is stateless — no conversation persistence, no chat history, no source tracking. `/conversations/{id}/ask` wraps the same RAG chain but adds:
-
-- **Chat history injection** — previous messages are loaded from DB and injected into the prompt, enabling follow-up questions.
-- **Source persistence** — sources are saved per-message, creating an audit trail of what the LLM saw.
 
 **SSE protocol:**
 
 ```
-data: {"type": "delta", "content": "According to"}
-
-data: {"type": "delta", "content": " [Source 1],"}
-
-data: {"type": "delta", "content": " Q3 revenues were $4.2M..."}
-
-data: {"type": "complete", "content": "According to [Source 1], Q3 revenues were $4.2M...", "conversation_id": "uuid", "sources": [...]}
+data: {"type": "status",   "content": "Searching documents..."}
+data: {"type": "status",   "content": "Resolving original content..."}
+data: {"type": "status",   "content": "Parsing document types..."}
+data: {"type": "status",   "content": "Building prompt..."}
+data: {"type": "status",   "content": "Generating response..."}
+data: {"type": "delta",    "content": "According to"}
+data: {"type": "delta",    "content": " [Source 1],"}
+data: {"type": "delta",    "content": " Q3 revenues were $4.2M..."}
+data: {"type": "complete", "content": "According to [Source 1]...", "conversation_id": "uuid", "sources": [...]}
 ```
-
-**Why retrieval isn't streamed:** Vector search + docstore lookup take ~200ms total. The LLM generation takes 3-5s. Only the slow part is streamed — the user sees tokens appear almost immediately after the short retrieval pause.
 
 ---
 

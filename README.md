@@ -36,7 +36,7 @@ The architecture is intentionally layered. Every design decision has a concrete 
 | **DB-backed chat memory** instead of LangChain's `RunnableWithMessageHistory` | LangChain memory has no user-scoping, no source tracking, no soft-delete | Manual history injection into prompts |
 | **Title-based chunking** via `chunk_by_title()` instead of `RecursiveCharacterTextSplitter` | Character splitting cuts across table rows, bullet items, and section boundaries | Depends on Unstructured's layout model quality |
 | **User-scoped vector retrieval** — `user_id` metadata filter on ChromaDB | Without it, User A's queries could surface User B's documents | Every ingestion and retrieval call must pass `user_id` |
-| **Streaming SSE on conversation `/ask`** | Users wait 3-5s for full LLM generation; streaming shows tokens immediately | More complex client integration (SSE parsing) |
+| **Full pipeline SSE streaming via `astream_events()`** | Users wait 3-5s with no feedback; streaming shows status per step + tokens immediately | More complex client integration (SSE parsing + status event handling) |
 | **`<user_question>` XML tags** in RAG prompt | Prompt injection — user can embed "ignore all instructions" in their question | Not bulletproof, but raises the bar significantly |
 | **Sync `def` routes** (not `async def`) | All I/O is synchronous (SQLAlchemy ORM, Ollama HTTP, file ops); `async def` with sync calls freezes the event loop | Cannot use async LangChain methods (`.ainvoke()`) without full async migration |
 
@@ -143,17 +143,14 @@ STREAMING CHAT (per question, streamed via SSE)
   Question ──▶ Load conversation history from DB
                       │
                       ▼
-               Same RAG retrieval as above (MMR → resolve originals)
+               LCEL chain: retriever → resolve_originals → parse_docs → build_prompt → llm
                       │
                       ▼
-               build_prompt() with context + history
+               chain.astream_events() ──▶ SSE per event
                       │
-                      ▼
-               llm.astream() ──▶ token-by-token SSE
-                      │
-                      ▼
-               {"type":"delta"} → {"type":"complete"}
-               + save assistant message with sources to DB
+               {"type":"status"} per step
+               {"type":"delta"}  per LLM token
+               {"type":"complete"} + save assistant message with sources to DB
 ```
 
 ---
@@ -382,7 +379,7 @@ POST /conversations/{id}/ask  {question}
 | **Token budgeting** | Unlimited context stuffing | 3000-token cap, most relevant first |
 | **History capping** | Full history in prompt | Last 4 exchanges (8 messages) |
 | **LLM retry** | Single attempt, fail on transient errors | `with_retry(stop_after_attempt=3)` |
-| **Streaming SSE** | Wait 3-5s for full response | Tokens stream as generated |
+| **Full pipeline SSE via `astream_events()`** | Wait 3-5s with no feedback | Status per step + tokens stream as generated |
 | **SQLite WAL mode** | Default journal (blocks on write) | Concurrent reads during writes |
 | **Batched summarization** | Sequential LLM calls | `.batch(max_concurrency=3)` |
 

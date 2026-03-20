@@ -148,12 +148,11 @@ LangChain is a Python framework for building LLM-powered applications. Think of 
 |---------------------|-----------------|--------------|
 | `ChatOllama` | `llm_service.py` | Wraps the Ollama API (local LLM server) into a standard interface |
 | `ChatPromptTemplate` | `llm_service.py` | Structured prompt templates with variables (`{element}`, `{image}`) |
-| `StrOutputParser` | `llm_service.py`, `rag_chain.py` | Extracts the text string from the LLM's response object |
+| `StrOutputParser` | `llm_service.py` | Extracts the text string from the LLM's response object |
 | `Chroma` | `vector_service.py` | ChromaDB vector store wrapper for storing and searching embeddings |
 | `HuggingFaceEmbeddings` | `vector_service.py` | Converts text into numerical vectors using a local embedding model |
 | `Document` | `rag_chain.py` | Standard container for text + metadata (the currency of LangChain) |
-| `RunnableLambda` | `rag_chain.py` | Wraps any Python function into a chainable step |
-| `RunnablePassthrough` | `rag_chain.py` | Passes input through unchanged (used for parallel data flow) |
+| `RunnableLambda` | `streaming_service.py` | Wraps any Python function into a chainable step |
 | `VectorStoreRetriever` | `retrieval_service.py` | Searches the vector store and returns matching documents |
 
 ### What LangChain Does NOT Do in This Project
@@ -738,95 +737,54 @@ The summary is good enough for **finding** the right chunk, but the original has
 
 ## Phase 3 — Generation: Building the Answer
 
-### The RAG Chain in Detail
+### The RAG Pipeline in Detail
 
-**File:** `src/services/rag_chain.py`
+**File:** `src/services/rag_chain.py` + `src/services/streaming_service.py`
 
-The complete chain is built in `get_rag_chain()`:
+The retrieval and generation steps are plain sequential function calls — no LCEL chain wrappers needed since there's no batching, async streaming, or composition beyond a single sequential path:
 
 ```python
-def get_rag_chain(retriever, chat_history=None):
-    history = chat_history or []
-    llm = get_qa_llm()  # Separate QA model (temp 0.7)
+# In streaming_service.py — Step 1: retrieve and process context
+docs = retriever.invoke(question)
+context = parse_docs(resolve_originals(docs))
 
-    # Step 1: Set up parallel data streams
-    setup_and_retrieval = {
-        "context": retriever | RunnableLambda(resolve_originals) | RunnableLambda(parse_docs),
-        "question": RunnablePassthrough(),
-        "chat_history": RunnableLambda(lambda _: history),
-    }
+# Step 2: build prompt
+messages = build_prompt({
+    "context": context,
+    "question": question,
+    "chat_history": history,
+})
 
-    # Step 2: Run retrieval + generation in one pipeline
-    chain_with_sources = setup_and_retrieval | RunnablePassthrough().assign(
-        response=(
-            RunnableLambda(build_prompt)
-            | llm
-            | StrOutputParser()
-        )
-    )
-
-    return chain_with_sources
+# Step 3: stream LLM response token-by-token
+async for chunk in llm.astream(messages):
+    yield token
 ```
 
-Let's trace what happens when you call `chain.invoke("What were Q3 revenues?")`:
-
-**Step 1: `setup_and_retrieval` (runs in parallel)**
-
-The dict syntax in LCEL means "run these branches in parallel, collect results into a dict":
+Let's trace what happens for `"What were Q3 revenues?"`:
 
 ```
-Input: "What were Q3 revenues?"
-         │
-    ┌────┼────────────────────────────────┐
-    │    │                                │
-    ▼    ▼                                ▼
-"context"                    "question"              "chat_history"
-    │                            │                        │
-    ▼                            ▼                        ▼
- retriever                 RunnablePassthrough()     lambda _: history
-    │                            │                        │
-    ▼                            │                        │
- [Summary docs]                  │                        │
-    │                            │                        │
-    ▼                            │                        │
- resolve_originals()             │                        │
-    │                            │                        │
-    ▼                            │                        │
- [Original docs]                 │                        │
-    │                            │                        │
-    ▼                            │                        │
- parse_docs()                    │                        │
-    │                            │                        │
-    ▼                            ▼                        ▼
-{"images": [...],       "What were Q3         [{"role": "user",
- "texts": [...]}         revenues?"            "content": "..."},
-                                               ...]
-
-Output: {
-    "context": {"images": [...], "texts": [...]},
-    "question": "What were Q3 revenues?",
-    "chat_history": [...]
-}
+Question ──▶ retriever.invoke()
+                    │
+                    ▼
+             [Summary docs from Chroma MMR search]
+                    │
+                    ▼
+             resolve_originals()  ← swap summary content for originals from docstore
+                    │
+                    ▼
+             [Original docs]
+                    │
+                    ▼
+             parse_docs()  ← split into {"images": [...], "texts": [...]}
+                    │
+                    ▼
+             build_prompt()  ← context + history + question → List[BaseMessage]
+                    │
+                    ▼
+             llm.astream()  ← token-by-token generation
 ```
 
-**Step 2: `RunnablePassthrough().assign(response=...)`**
-
-This takes the dict from Step 1, passes it through unchanged, AND runs the response generation chain in parallel:
-
-```
-Input dict ──┬──▶ kept as-is (context, question, chat_history)
-             │
-             └──▶ build_prompt() ──▶ llm ──▶ StrOutputParser() ──▶ response
-
-Output: {
-    "context": {...},          # Same as input (for source attribution)
-    "question": "...",         # Same as input
-    "chat_history": [...],     # Same as input
-    "response": "According to [Source 1], Q3 revenues were $4.2M..."  # NEW
-}
-```
-
-**Why `RunnablePassthrough().assign()`?** Because we need the `context` in the final output — it tells us which documents the LLM actually saw, so we can show sources to the user. Without `.assign()`, the context would be consumed by the prompt builder and lost.
+**Why plain function calls instead of an LCEL chain?** The `|` pipe operator adds value when you need LangChain features like `.batch()`, `.astream()` across the full chain, or composing with other runnables. Here we only stream the LLM step — retrieval is always a single synchronous call. Plain functions are simpler, easier to read, and have less overhead.
 
 ### `parse_docs`: Separating Images from Text
 
@@ -997,24 +955,25 @@ Note that images live in the **user message** (not the system message) because:
 
 ### Streaming Responses
 
-**File:** `src/routes/query_routes.py`
+**File:** `src/services/streaming_service.py`
 
-The `/query/ask/stream` endpoint sends tokens as they're generated, instead of waiting for the complete response:
+The `/conversations/{id}/ask` endpoint streams tokens via SSE as they're generated. Retrieval is non-streamed (happens first in one pass); only the LLM generation is streamed:
 
 ```python
-@router.post("/ask/stream")
-async def ask_stream(payload: QueryRequest, current_user: User = Depends(get_current_user)):
-    vectorstore = get_vectorstore()
-    retriever, _ = get_multi_vector_retriever(vectorstore, user_id=current_user.id)
-    chain = get_rag_chain(retriever, chat_history=payload.chat_history)
+# Step 1: retrieve context (non-streamed)
+docs = retriever.invoke(question)
+context = parse_docs(resolve_originals(docs))
 
-    async def event_generator():
-        async for chunk in chain.astream(payload.question):
-            if isinstance(chunk, dict) and "response" in chunk:
-                yield f"data: {chunk['response']}\n\n"
-        yield "data: [DONE]\n\n"
+# Step 2: build prompt
+messages = build_prompt({"context": context, "question": question, "chat_history": history})
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+# Step 3: stream LLM tokens
+async for chunk in llm.astream(messages):
+    token = chunk.content
+    yield f"data: {json.dumps({'type': 'delta', 'content': token})}\n\n"
+
+# Step 4: send completion event with sources
+yield f"data: {json.dumps({'type': 'complete', 'content': full_response, 'sources': sources})}\n\n"
 ```
 
 **How Server-Sent Events (SSE) work:**
@@ -1368,7 +1327,7 @@ All tunable constants are in `src/config/constants.py`:
 | Constant | Value | Purpose |
 |----------|-------|---------|
 | `DEFAULT_CHROMA_PERSIST_DIR` | `./chroma_db` | Where ChromaDB stores its data on disk |
-| `DEFAULT_DOCSTORE_PATH` | `./docstore.json` | Path for SQLite docstore (`.json` is auto-converted to `.db`) |
+| `DEFAULT_DOCSTORE_PATH` | `./docstore.db` | Path for the SQLite docstore |
 | `COLLECTION_NAME` | `document_summaries` | ChromaDB collection name |
 
 ### Retrieval

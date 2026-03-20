@@ -2,7 +2,7 @@
 
 # Vector store
 DEFAULT_CHROMA_PERSIST_DIR: str = "./chroma_db"
-DEFAULT_DOCSTORE_PATH: str = "./docstore.json"
+DEFAULT_DOCSTORE_PATH: str = "./docstore.db"
 COLLECTION_NAME: str = "document_summaries"
 
 # Retrieval

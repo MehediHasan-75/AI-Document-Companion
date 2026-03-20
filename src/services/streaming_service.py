@@ -9,7 +9,6 @@ import json
 import logging
 from typing import Any, AsyncGenerator, Dict, List
 
-from langchain_core.runnables import RunnableLambda
 from langchain_ollama import ChatOllama
 from sqlalchemy.orm import Session
 
@@ -71,12 +70,7 @@ async def stream_chat_response(
         # Step 1: Retrieve and process context (non-streaming)
         vectorstore = get_vectorstore()
         retriever, _ = get_multi_vector_retriever(vectorstore, user_id=user_id)
-        retrieval_chain = (
-            retriever
-            | RunnableLambda(resolve_originals)
-            | RunnableLambda(parse_docs)
-        )
-        context = retrieval_chain.invoke(question)
+        context = parse_docs(resolve_originals(retriever.invoke(question)))
         sources = _extract_sources(context)
 
         # Step 2: Build prompt with context + history

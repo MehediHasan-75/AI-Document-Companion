@@ -3,16 +3,12 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from langchain_core.documents import Document
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.runnables import RunnableLambda, RunnablePassthrough
-
 from src.config.constants import DEFAULT_ID_KEY, MAX_CONTEXT_TOKENS, MAX_HISTORY_EXCHANGES
 from src.config.prompts import RAG_SYSTEM_PROMPT
-from src.services.llm_service import get_qa_llm
 from src.services.vector_service import get_docstore
 
 logger = logging.getLogger(__name__)
@@ -119,34 +115,3 @@ def build_prompt(kwargs: Dict[str, Any]) -> List[BaseMessage]:
     messages.append(HumanMessage(content=question_content))
 
     return messages
-
-
-def get_rag_chain(
-    retriever: Any,
-    chat_history: Optional[List[Dict[str, str]]] = None,
-) -> Any:
-    """Construct RAG chain for question answering with sources.
-
-    Returns a single chain that carries context through so the caller gets
-    sources that exactly match what the LLM received — eliminates a second
-    retrieval call. The response is in result["response"], sources in
-    result["context"].
-    """
-    history = chat_history or []
-    llm = get_qa_llm()
-
-    setup_and_retrieval = {
-        "context": retriever | RunnableLambda(resolve_originals) | RunnableLambda(parse_docs),
-        "question": RunnablePassthrough(),
-        "chat_history": RunnableLambda(lambda _: history),
-    }
-
-    chain_with_sources = setup_and_retrieval | RunnablePassthrough().assign(
-        response=(
-            RunnableLambda(build_prompt)
-            | llm
-            | StrOutputParser()
-        )
-    )
-
-    return chain_with_sources

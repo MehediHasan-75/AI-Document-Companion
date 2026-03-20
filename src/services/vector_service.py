@@ -20,18 +20,12 @@ _docstore: Optional["SimpleDocStore"] = None
 
 
 class SimpleDocStore:
-    """SQLite-backed key-value store for original document content.
-
-    Fix #2: replaces the JSON implementation which rewrote the entire file on
-    every write (O(n) cost) and had no protection against concurrent access.
-    SQLite WAL mode allows multiple concurrent readers and atomic writes.
+    """
+    SQLite-backed key-value store for original document content.
     """
 
     def __init__(self, persist_path: Optional[str] = None) -> None:
         path = persist_path or ":memory:"
-        # Transparently redirect legacy .json path to .db
-        if path.endswith(".json"):
-            path = path[:-5] + ".db"
         if path != ":memory:":
             Path(path).parent.mkdir(parents=True, exist_ok=True)
         # Single persistent connection — required for :memory: and efficient for files

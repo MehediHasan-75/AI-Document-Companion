@@ -30,7 +30,7 @@ The architecture is intentionally layered. Every design decision has a concrete 
 | Decision | Problem It Solves | Trade-off Accepted |
 |----------|-------------------|-------------------|
 | **Summary-based embedding** — LLM summaries are embedded, not raw chunks | Raw chunks have low cosine similarity to natural questions; `all-MiniLM-L6-v2` truncates at 256 tokens, losing long chunk tails | Extra LLM call per chunk at ingestion (write-time cost for read-time quality) |
-| **Dual-store architecture** — summaries in ChromaDB, originals in SQLite | Retrieval uses summaries (better semantic match), but the LLM needs full-fidelity originals for reasoning | Two stores to maintain; `resolve_originals()` step required in the chain |
+| **Dual-store architecture** — summaries in ChromaDB, originals in SQLite | Retrieval uses summaries (better semantic match), but the LLM needs full-fidelity originals for reasoning | Two stores to maintain; `resolve_originals()` step required in the pipeline |
 | **MMR search** (k=5, fetch_k=20) instead of plain similarity | Similarity search returns near-duplicate chunks from the same section | Slightly slower than pure similarity (20 candidates vs 5) |
 | **Separate QA and summarization LLMs** — same model, different temperatures | Summarization needs low temp (0.5) for factual extraction; QA needs higher temp (0.7) for fluent synthesis | Two singleton instances consuming memory |
 | **DB-backed chat memory** instead of LangChain's `RunnableWithMessageHistory` | LangChain memory has no user-scoping, no source tracking, no soft-delete | Manual history injection into prompts |
@@ -568,7 +568,7 @@ curl -N -X POST http://localhost:8000/conversations/$CONV_ID/ask \
         ├── unstructured_service.py # partition(hi_res) + chunk_by_title()
         ├── chunk_service.py        # Classify: CompositeElement / Table / Image
         ├── llm_service.py          # Singleton LLMs: text (0.5), QA (0.7), vision
-        ├── rag_chain.py            # LCEL chain: retrieve → resolve → prompt → generate
+        ├── rag_chain.py            # Pipeline helpers: resolve_originals, parse_docs, build_prompt
         ├── retrieval_service.py    # MMR retriever, user-scoped, add_documents
         ├── vector_service.py       # Chroma singleton + SQLite DocStore (WAL, batch)
         ├── query_service.py        # ask_with_sources (single-retrieval chain)

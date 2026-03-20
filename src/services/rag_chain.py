@@ -7,6 +7,8 @@ from typing import Any, Dict, List
 
 from langchain_core.documents import Document
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from langchain_core.runnables import RunnableLambda
+
 from src.config.constants import DEFAULT_ID_KEY, MAX_CONTEXT_TOKENS, MAX_HISTORY_EXCHANGES
 from src.config.prompts import RAG_SYSTEM_PROMPT
 from src.services.vector_service import get_docstore
@@ -115,3 +117,24 @@ def build_prompt(kwargs: Dict[str, Any]) -> List[BaseMessage]:
     messages.append(HumanMessage(content=question_content))
 
     return messages
+
+
+def build_rag_chain(retriever: Any, question: str, history: List[Dict[str, Any]]) -> Any:
+    """Build the full RAG LCEL chain for streaming via astream_events().
+
+    Chain: retriever → resolve_originals → parse_docs → build_prompt → llm
+    Each step is named so astream_events() can identify it by event["name"].
+    """
+    from src.services.llm_service import get_qa_llm
+
+    return (
+        retriever
+        | RunnableLambda(resolve_originals).with_config(run_name="resolve_originals")
+        | RunnableLambda(parse_docs).with_config(run_name="parse_docs")
+        | RunnableLambda(lambda ctx: build_prompt({
+            "context": ctx,
+            "question": question,
+            "chat_history": history,
+        })).with_config(run_name="build_prompt")
+        | get_qa_llm()
+    )

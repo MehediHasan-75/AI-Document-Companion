@@ -10,15 +10,12 @@ import json
 import logging
 from typing import Any, AsyncGenerator, Dict, List
 
-from langchain_core.runnables import RunnableLambda
-from langchain_ollama import ChatOllama
 from sqlalchemy.orm import Session
 
-from src.config import settings
-from src.config.constants import DEFAULT_ID_KEY, QA_TEMPERATURE
+from src.config.constants import DEFAULT_ID_KEY
 from src.models.message import MessageRole
 from src.services.conversation_service import conversation_service
-from src.services.rag_chain import build_prompt, parse_docs, resolve_originals
+from src.services.rag_chain import build_rag_chain
 from src.services.retrieval_service import get_multi_vector_retriever
 from src.services.vector_service import get_vectorstore
 
@@ -80,23 +77,7 @@ async def stream_chat_response(
     try:
         vectorstore = get_vectorstore()
         retriever, _ = get_multi_vector_retriever(vectorstore, user_id=user_id)
-        llm = ChatOllama(
-            model=settings.OLLAMA_MODEL,
-            base_url=settings.OLLAMA_HOST,
-            temperature=QA_TEMPERATURE,
-        )
-
-        chain = (
-            retriever
-            | RunnableLambda(resolve_originals).with_config(run_name="resolve_originals")
-            | RunnableLambda(parse_docs).with_config(run_name="parse_docs")
-            | RunnableLambda(lambda ctx: build_prompt({
-                "context": ctx,
-                "question": question,
-                "chat_history": history,
-            })).with_config(run_name="build_prompt")
-            | llm
-        )
+        chain = build_rag_chain(retriever, question, history)
 
         async for event in chain.astream_events(question, version="v2"):
             kind = event["event"]

@@ -152,7 +152,7 @@ LangChain is a Python framework for building LLM-powered applications. Think of 
 | `Chroma` | `vector_service.py` | ChromaDB vector store wrapper for storing and searching embeddings |
 | `HuggingFaceEmbeddings` | `vector_service.py` | Converts text into numerical vectors using a local embedding model |
 | `Document` | `rag_chain.py` | Standard container for text + metadata (the currency of LangChain) |
-| `RunnableLambda` | `streaming_service.py` | Wraps any Python function into a chainable step |
+| `RunnableLambda` | `rag_chain.py` | Wraps any Python function into a chainable step |
 | `VectorStoreRetriever` | `retrieval_service.py` | Searches the vector store and returns matching documents |
 
 ### What LangChain Does NOT Do in This Project
@@ -741,7 +741,7 @@ The summary is good enough for **finding** the right chunk, but the original has
 
 **File:** `src/services/rag_chain.py` + `src/services/streaming_service.py`
 
-The full pipeline is composed as an LCEL chain in `streaming_service.py` and executed via `astream_events()`, which emits lifecycle events for every step — enabling status updates to the client at each stage, not just LLM tokens:
+The full pipeline is composed as an LCEL chain in `build_rag_chain()` (`rag_chain.py`) and executed via `astream_events()` in `streaming_service.py`, which emits lifecycle events for every step — enabling status updates to the client at each stage, not just LLM tokens:
 
 ```python
 chain = (

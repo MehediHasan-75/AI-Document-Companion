@@ -565,12 +565,12 @@ curl -N -X POST http://localhost:8000/conversations/$CONV_ID/ask \
         ├── unstructured_service.py # partition(hi_res) + chunk_by_title()
         ├── chunk_service.py        # Classify: CompositeElement / Table / Image
         ├── llm_service.py          # Singleton LLMs: text (0.5), QA (0.7), vision
-        ├── rag_chain.py            # Pipeline helpers: resolve_originals, parse_docs, build_prompt
+        ├── rag_chain.py            # RAG pipeline: build_rag_chain(), resolve_originals, parse_docs, build_prompt
         ├── retrieval_service.py    # MMR retriever, user-scoped, add_documents
         ├── vector_service.py       # Chroma singleton + SQLite DocStore (WAL, batch)
         ├── query_service.py        # ask_with_sources (single-retrieval chain)
         ├── conversation_service.py # Message CRUD, 20-msg window, source tracking
-        └── streaming_service.py    # Token-by-token SSE streaming for conversation /ask
+        └── streaming_service.py    # SSE event handling + conversation persistence for /ask
 ```
 
 ---

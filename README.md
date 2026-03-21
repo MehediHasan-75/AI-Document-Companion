@@ -184,13 +184,7 @@ Query:
                            originals injected into LLM prompt
 ```
 
-The LLM reasons over **originals** (full fidelity), retrieved via **summaries** (better semantic match). The `chain_with_sources` LCEL chain carries context through so the API returns the exact documents the LLM saw — not a second retrieval call:
-
-```python
-chain_with_sources = setup_and_retrieval | RunnablePassthrough().assign(
-    response=(RunnableLambda(build_prompt) | llm | StrOutputParser())
-)
-```
+The LLM reasons over **originals** (full fidelity), retrieved via **summaries** (better semantic match). `build_rag_chain()` composes the full pipeline and `astream_events()` surfaces each step to the client — sources are captured from the `parse_docs` chain-end event, so the API returns exactly what the LLM saw without a second retrieval call.
 
 </details>
 
@@ -328,11 +322,11 @@ Route handler
 </details>
 
 <details>
-<summary><strong>Streaming Chat: Token-by-Token RAG over SSE</strong></summary>
+<summary><strong>Streaming Chat: Full Pipeline SSE via astream_events()</strong></summary>
 
 <br>
 
-> **TL;DR:** `POST /conversations/{id}/ask` streams the RAG response token-by-token via SSE instead of returning a buffered JSON response. Retrieval happens first (non-streamed), then the LLM answer streams — giving a ChatGPT-like experience where text appears as it's generated. Messages and sources are persisted to the conversation.
+> **TL;DR:** `POST /conversations/{id}/ask` streams the entire RAG pipeline via SSE — status events for each step (retrieval, resolving originals, building prompt) plus token-by-token LLM output. Uses LangChain's `astream_events()` on a full LCEL chain. Messages and sources are persisted to the conversation.
 
 ```
 POST /conversations/{id}/ask  {question}
@@ -340,26 +334,29 @@ POST /conversations/{id}/ask  {question}
   1. Validate conversation ownership
   2. Load chat history from DB
   3. Save user message
-  4. Retrieve context (MMR, same as /query/ask)
-  5. Build prompt (context + history + question)
-  6. llm.astream() → yield tokens as SSE
-  7. Save assistant message + sources to DB
-  8. Send complete event
+  4. Build LCEL chain: retriever → resolve_originals → parse_docs → build_prompt → llm
+  5. chain.astream_events() → status per step + delta per token
+  6. Save assistant message + sources to DB
+  7. Send complete event
 ```
 
 **Key design choices:**
 
-- **Retrieval is not streamed** — vector search + docstore lookup happen first in one pass. Only the LLM generation is streamed, since that's the slow part (3-5s).
-- **Same RAG chain as `/query/ask`** — reuses `build_prompt`, `resolve_originals`, `parse_docs`. No separate pipeline to maintain.
-- **Conversation is required** — the frontend creates a conversation first via `POST /conversations`, then sends questions. No separate streaming endpoint to maintain.
-- **Sources in completion** — the `complete` event includes the full source list, so the frontend can render source cards after the stream finishes.
+- **Full pipeline streamed via `astream_events()`** — fires lifecycle events (`on_retriever_start`, `on_chain_start`, `on_chat_model_stream`) for every step, mapped to SSE status/delta events. The client sees progress at each stage, not just when tokens start.
+- **Chain built in `rag_chain.py`** — `build_rag_chain()` owns chain construction; `streaming_service.py` handles SSE protocol and conversation persistence only.
+- **Sources from chain events** — captured from the `parse_docs` `on_chain_end` event, not a second retrieval call.
+- **Conversation is required** — the frontend creates a conversation first via `POST /conversations`, then sends questions.
 
 **SSE protocol:**
 
 ```json
-{"type": "delta", "content": "partial token"}
+{"type": "status",   "content": "Searching documents..."}
+{"type": "status",   "content": "Resolving original content..."}
+{"type": "status",   "content": "Building prompt..."}
+{"type": "status",   "content": "Generating response..."}
+{"type": "delta",    "content": "partial token"}
 {"type": "complete", "content": "full response", "conversation_id": "uuid", "sources": [...]}
-{"type": "error", "content": "error message"}
+{"type": "error",    "content": "error message"}
 ```
 
 </details>
@@ -501,8 +498,8 @@ CONV_ID=$(curl -s -X POST http://localhost:8000/conversations \
   -H "Content-Type: application/json" -d '{}' \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
 
-# Response streams token-by-token via SSE:
-#   {"type":"delta","content":"..."} ... {"type":"complete","content":"...","sources":[...]}
+# Response streams full pipeline via SSE:
+#   {"type":"status",...} ... {"type":"delta","content":"..."} ... {"type":"complete","content":"...","sources":[...]}
 curl -N -X POST http://localhost:8000/conversations/$CONV_ID/ask \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
@@ -554,7 +551,6 @@ curl -N -X POST http://localhost:8000/conversations/$CONV_ID/ask \
     │   ├── auth_routes.py          # /auth/register, /login, /me
     │   ├── file_routes.py          # /files (list), /upload, /delete
     │   ├── process_routes.py       # /files/process/{id}, /status/{id}
-    │   ├── query_routes.py         # /query/ask, /query/ask/stream (SSE)
     │   └── conversation_routes.py  # /conversations CRUD + /ask (streaming SSE)
     └── services/
         ├── auth_service.py         # bcrypt hashing, JWT issue/verify

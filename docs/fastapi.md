@@ -1104,12 +1104,6 @@ Visit `http://localhost:8000/docs` in your browser. You'll see:
 | POST | `/files/process/{file_id}` | Yes | Path param | `{file_id, status, message}` | 200 |
 | GET | `/files/status/{file_id}` | Yes | Path param | `{file_id, status}` | 200 |
 
-### Query (`/query`)
-
-| Method | Path | Auth | Request | Response | Status |
-|--------|------|------|---------|----------|--------|
-| POST | `/query/ask` | Yes | `QueryRequest` (JSON) | `{answer, sources[]}` | 200 |
-
 ### Conversations (`/conversations`)
 
 | Method | Path | Auth | Request | Response | Status |
@@ -1132,4 +1126,4 @@ Visit `http://localhost:8000/docs` in your browser. You'll see:
 - `{"type": "complete", "content": "full response", "conversation_id": "uuid", "sources": [...]}` — final message with sources
 - `{"type": "error", "content": "error details"}` — error notification
 
-Uses the same RAG pipeline as `/query/ask` but streams the LLM response token-by-token instead of buffering it. Chat history is loaded from the conversation and injected into the prompt. Messages (user + assistant) and sources are persisted.
+Streams the LLM response token-by-token. Chat history is loaded from the conversation and injected into the prompt. Messages (user + assistant) and sources are persisted.

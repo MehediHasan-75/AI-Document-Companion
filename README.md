@@ -32,7 +32,7 @@ The architecture is intentionally layered. Every design decision has a concrete 
 | **Summary-based embedding** — LLM summaries are embedded, not raw chunks | Raw chunks have low cosine similarity to natural questions; `all-MiniLM-L6-v2` truncates at 256 tokens, losing long chunk tails | Extra LLM call per chunk at ingestion (write-time cost for read-time quality) |
 | **Dual-store architecture** — summaries in ChromaDB, originals in SQLite | Retrieval uses summaries (better semantic match), but the LLM needs full-fidelity originals for reasoning | Two stores to maintain; `resolve_originals()` step required in the pipeline |
 | **MMR search** (k=5, fetch_k=20) instead of plain similarity | Similarity search returns near-duplicate chunks from the same section | Slightly slower than pure similarity (20 candidates vs 5) |
-| **Separate QA and summarization LLMs** — same model, different temperatures | Summarization needs low temp (0.5) for factual extraction; QA needs higher temp (0.7) for fluent synthesis | Two singleton instances consuming memory |
+| **Separate QA and summarization LLMs** — different models and temperatures | Summarization (deepseek-r1, temp 0.5) needs factual extraction; QA uses llava (temp 0.7) so it can reason over both retrieved text and retrieved images | Two singleton instances consuming memory |
 | **DB-backed chat memory** instead of LangChain's `RunnableWithMessageHistory` | LangChain memory has no user-scoping, no source tracking, no soft-delete | Manual history injection into prompts |
 | **Title-based chunking** via `chunk_by_title()` instead of `RecursiveCharacterTextSplitter` | Character splitting cuts across table rows, bullet items, and section boundaries | Depends on Unstructured's layout model quality |
 | **User-scoped vector retrieval** — `user_id` metadata filter on ChromaDB | Without it, User A's queries could surface User B's documents | Every ingestion and retrieval call must pass `user_id` |
@@ -131,7 +131,7 @@ QUERY (per question, ~2-5s)
                      build_prompt()  ◄── context + history + rules
                             │           (token budget: 3000)
                             ▼           (history cap: 4 exchanges)
-                     deepseek-r1:8b (temp 0.7, with retry)
+                     llava (temp 0.7, with retry)
                             │
                             ▼
                      Answer + [Source N] citations
@@ -397,8 +397,6 @@ POST /conversations/{id}/ask  {question}
 | `POST` | `/files/process/{file_id}` | ✓ | Trigger async ingestion pipeline (user-scoped). |
 | `GET` | `/files/status/{file_id}` | ✓ | Poll ingestion status. |
 | `DELETE` | `/files/delete` | ✓ | Delete a document by `file_id`. |
-| `POST` | `/query/ask` | ✓ | RAG query with optional `chat_history`. Returns answer + sources. |
-| `POST` | `/query/ask/stream` | ✓ | Streaming RAG query via Server-Sent Events. |
 | `POST` | `/conversations` | ✓ | Create a conversation. |
 | `GET` | `/conversations` | ✓ | List your conversations. |
 | `POST` | `/conversations/{id}/ask` | ✓ | **Streaming** — ask with history, response streamed token-by-token via SSE. |
@@ -419,8 +417,8 @@ brew install libmagic poppler tesseract
 
 # Ollama — local LLM runtime
 curl -fsSL https://ollama.com/install.sh | sh
-ollama pull deepseek-r1:8b   # text LLM (summarization + QA)
-ollama pull llava             # vision LLM (image understanding)
+ollama pull deepseek-r1:8b   # text LLM (summarization)
+ollama pull llava             # vision LLM (image summarization + QA)
 ```
 
 ### Install
@@ -486,13 +484,7 @@ curl -X POST http://localhost:8000/files/process/$FILE_ID \
 curl http://localhost:8000/files/status/$FILE_ID \
   -H "Authorization: Bearer $TOKEN"
 
-# 6. Ask a question (stateless)
-curl -X POST http://localhost:8000/query/ask \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"question": "What are the main findings?"}'
-
-# 7. Or use a conversation (persistent memory)
+# 6. Ask a question via a conversation (persistent memory)
 CONV_ID=$(curl -s -X POST http://localhost:8000/conversations \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" -d '{}' \

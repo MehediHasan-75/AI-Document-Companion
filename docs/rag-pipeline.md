@@ -126,7 +126,7 @@ QUERY (happens per question, takes seconds)
          │
          ▼
   ┌─────────────┐
-  │  LLM         │  DeepSeek generates answer using ONLY the provided context
+  │  LLM         │  llava generates answer using retrieved text and images
   │  (generate)  │
   └──────┬──────┘
          │
@@ -234,7 +234,7 @@ Both work. The pipe syntax gives three advantages:
    results = chain.batch(texts, {"max_concurrency": 3})
    ```
 
-2. **`.astream()`** — Stream results token-by-token (used in `/query/ask/stream`):
+2. **`.astream()`** — Stream results token-by-token (used in `/conversations/{id}/ask`):
    ```python
    async for token in chain.astream(question):
        yield token  # Send each token as it's generated
@@ -928,10 +928,7 @@ Instead of flattening history into a single string like `"User: ... Assistant: .
 
 **Why cap at 4 exchanges?** Each exchange (user question + assistant answer) consumes tokens from the context window. With a 3000-token context budget, long histories would crowd out actual document content — the LLM would have lots of conversation context but little document context.
 
-**Where does chat history come from?** Two paths:
-
-1. **`POST /query/ask`** — The client can send `chat_history` in the request body (stateless, client manages history)
-2. **`POST /conversations/{id}/ask`** — The server loads history from the database automatically (stateful, server manages history)
+**Where does chat history come from?** `POST /conversations/{id}/ask` — the server loads history from the database automatically (stateful, server manages history).
 
 ### Multi-Modal Support
 
@@ -1068,11 +1065,11 @@ Temperature 0.5: "Revenue reached $4.2M in Q3."        (slight variation)
 Temperature 1.0: "Q3 saw impressive revenue of $4.2M!" (creative, sometimes wrong)
 ```
 
-| Task | Temperature | Why |
-|------|-------------|-----|
-| **Summarization** | 0.5 (low) | We need factual, consistent summaries. Creative rephrasing could lose key details. |
-| **QA answers** | 0.7 (moderate) | We want natural, fluent answers — not robotic repetition of the source text. |
-| **Image description** | 0.7 (moderate) | Describing visuals benefits from some expressiveness. |
+| Task | Model | Temperature | Why |
+|------|-------|-------------|-----|
+| **Summarization** | deepseek-r1:8b | 0.5 (low) | We need factual, consistent summaries. Creative rephrasing could lose key details. |
+| **QA answers** | llava | 0.7 (moderate) | llava is a vision model — it can reason over both retrieved text and retrieved base64 images in the same prompt. |
+| **Image description** | llava | 0.7 (moderate) | Describing visuals benefits from some expressiveness. |
 
 **Why singletons?** Creating a `ChatOllama` object involves establishing a connection to the Ollama server. If we created a new one per request, we'd have unnecessary connection overhead. The singleton pattern creates the connection once and reuses it:
 
@@ -1124,7 +1121,7 @@ def get_qa_llm():
     global _qa_llm
     if _qa_llm is None:
         _qa_llm = ChatOllama(
-            model=settings.OLLAMA_MODEL,
+            model=VISION_MODEL,            # llava — handles both text and image context
             base_url=settings.OLLAMA_HOST,
             temperature=QA_TEMPERATURE,
         ).with_retry(stop_after_attempt=LLM_MAX_RETRIES)  # Retry up to 3 times

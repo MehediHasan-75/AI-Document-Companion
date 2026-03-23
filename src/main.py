@@ -52,7 +52,7 @@ async def skip_gzip_for_sse(request: Request, call_next):
     token-by-token streaming. We strip the Accept-Encoding header
     for SSE paths so the GZip middleware passes them through uncompressed.
     """
-    if request.url.path.endswith("/stream"):
+    if request.url.path.endswith("/ask"):
         # Remove Accept-Encoding so GZipMiddleware won't compress
         scope = request.scope
         headers = [(k, v) for k, v in scope["headers"] if k != b"accept-encoding"]

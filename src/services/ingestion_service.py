@@ -25,12 +25,6 @@ class IngestionResult(TypedDict):
     docstore: SimpleDocStore
 
 
-class ExtractionStats(TypedDict):
-    texts: int
-    tables: int
-    images: int
-
-
 def ingest_document_pipeline(
     file_path: str,
     max_concurrency: int = DEFAULT_MAX_CONCURRENCY,

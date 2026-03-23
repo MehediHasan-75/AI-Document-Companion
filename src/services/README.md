@@ -17,8 +17,8 @@ Core business logic for the AI Document Companion RAG pipeline.
 │                           ┌────────────────────────────────┼─────┐       │
 │                           │                                ▼     │       │
 │   ┌─────────────────┐     │  ┌─────────────────┐  ┌─────────────────┐   │
-│   │  query_service  │◀────┼──│retrieval_service│◀─│  vector_service │   │
-│   │    (RAG Q&A)    │     │  │ (Multi-Vector)  │  │ (ChromaDB/Store)│   │
+│   │   rag_chain     │◀────┼──│retrieval_service│◀─│  vector_service │   │
+│   │  (LCEL Chain)   │     │  │ (Multi-Vector)  │  │ (ChromaDB/Store)│   │
 │   └────────┬────────┘     │  └─────────────────┘  └─────────────────┘   │
 │            │               │                                             │
 │            ▼               │                                             │
@@ -44,10 +44,10 @@ Core business logic for the AI Document Companion RAG pipeline.
 | **FileService** | `file_service.py` | Upload, store, delete files; generate UUIDs |
 | **ProcessService** | `process_service.py` | Orchestrate ingestion; track status (uploaded→processing→processed/failed) |
 | **IngestionService** | `ingestion_service.py` | Full document pipeline: parse → summarize → embed → store |
-| **QueryService** | `query_service.py` | Handle RAG queries: retrieve context → generate answer |
+| **RagChain** | `rag_chain.py` | Build LCEL chain: retrieve → resolve originals → prompt → LLM |
 | **VectorService** | `vector_service.py` | Manage ChromaDB (embeddings) and SimpleDocStore (originals) |
 | **RetrievalService** | `retrieval_service.py` | Multi-vector retrieval: search summaries, return originals |
-| **LLMService** | `llm_service.py` | Chains for summarization (Deepseek) and vision (Llava) |
+| **LLMService** | `llm_service.py` | Chains for summarization (deepseek-r1), QA (llava), and image description (llava) |
 | **ChunkService** | `chunk_service.py` | Separate elements by type; extract base64 images |
 | **UnstructuredService** | `unstructured_service.py` | PDF parsing with hi_res strategy |
 | **StreamingService** | `streaming_service.py` | Token-by-token SSE streaming for conversation /ask |
@@ -76,26 +76,10 @@ Core business logic for the AI Document Companion RAG pipeline.
    ├── vector_service.get_docstore()              → SimpleDocStore
    └── retrieval_service.add_documents_to_retriever()
        ├── Embed summaries → ChromaDB
-       └── Store originals → docstore.json
+       └── Store originals → docstore.db
 
 4. STATUS UPDATE
    └── process_service._write_status() → "processed" or "failed"
-```
-
-## Query Flow
-
-```
-POST /query/ask {"question": "..."}
-
-query_service.ask(question)
-├── vector_service.get_vectorstore()
-├── retrieval_service.get_multi_vector_retriever()
-├── retrieval_service.retrieve_with_sources(question)
-│   ├── Embed question → all-MiniLM-L6-v2
-│   ├── Similarity search in ChromaDB
-│   └── Fetch originals from docstore by doc_id
-├── llm_service.get_rag_chain()
-└── Generate answer with Deepseek-R1
 ```
 
 ## Streaming Chat Flow
@@ -107,7 +91,7 @@ streaming_service.stream_chat_response()
 ├── Validate conversation ownership
 ├── Load chat history from DB (last 20 messages)
 ├── Save user message
-├── Retrieve context (same RAG pipeline as /query/ask)
+├── Retrieve context
 │   ├── retriever → MMR search (fetch 20, return 5)
 │   ├── resolve_originals() → swap summaries for originals
 │   └── parse_docs() → separate images from text
@@ -156,15 +140,11 @@ Each service has placeholder comments for:
 
 ```python
 # Direct service usage
-from src.services import file_service, process_service, query_service
+from src.services import file_service, process_service
 
 # Upload
-result = file_service.save_upload(uploaded_file)
-file_id = result["file_id"]
+file_id = file_service.save_upload(uploaded_file)
 
-# Process (sync)
-process_service.process_file(file_id)
-
-# Query
-answer = query_service.ask("What is the main topic?")
+# Process (async, via BackgroundTasks)
+process_service.process_file_async(file_id, background_tasks, user_id=user_id)
 ```

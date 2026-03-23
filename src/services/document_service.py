@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
-from src.models.document import Document, DocumentStatus, DocumentType
+from src.models.document import Document, DocumentStatus
 
 logger = logging.getLogger(__name__)
 

@@ -11,7 +11,7 @@ AI Document Companion — a multimodal RAG (Retrieval-Augmented Generation) pipe
 ```bash
 # Run development server
 source .venv/bin/activate
-uvicorn main:app --reload
+uvicorn src.main:app --reload
 
 # Install dependencies
 pip install -r requirements.txt
@@ -33,7 +33,6 @@ No test suite, linter, or formatter is currently configured.
 **Layered structure:** Routes → Services, with FastAPI dependency injection for DB sessions and auth.
 
 ```
-main.py                          # ASGI entrypoint, re-exports src.main:app
 src/
   main.py                        # FastAPI app, middleware, exception handlers, startup (init_db)
   routes/index.py                # Aggregates all route modules

@@ -47,7 +47,7 @@ def get_qa_llm() -> ChatOllama:
     global _qa_llm
     if _qa_llm is None:
         _qa_llm = ChatOllama(
-            model=settings.OLLAMA_MODEL,
+            model=VISION_MODEL,
             base_url=settings.OLLAMA_HOST,
             temperature=QA_TEMPERATURE,
         ).with_retry(stop_after_attempt=LLM_MAX_RETRIES)

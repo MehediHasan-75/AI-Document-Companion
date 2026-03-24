@@ -8,14 +8,14 @@ Defines file upload and deletion endpoints.
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, File, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session
 
 from src.core.exceptions import AppError
 from src.dependencies.auth import get_current_user
 from src.dependencies.db import get_db
 from src.models.user import User
-from src.schemas.file import FileDeleteResponse, FileListResponse, FileUploadResponse, MultiFileUploadResponse
+from src.schemas.file import FileDeleteResponse, FileItem, FileListResponse, FileUploadResponse, MultiFileUploadResponse
 from src.services.document_service import document_service
 from src.services.file_service import file_service
 
@@ -39,6 +39,26 @@ def list_files(
     return document_service.list_documents(
         db, user_id=current_user.id, page=page, limit=limit
     )
+
+
+@router.get(
+    "/{file_id}",
+    response_model=FileItem,
+    summary="Get a single file by id",
+    responses={
+        401: {"description": "Invalid or expired token"},
+        404: {"description": "File not found"},
+    },
+)
+def get_file(
+    file_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    doc = document_service.get_document(db, file_id, current_user.id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="File not found")
+    return doc
 
 
 @router.post(
@@ -116,7 +136,9 @@ def upload_multiple_files(
 )
 def delete_file(
     file_id: str,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     file_service.delete_file(file_id)
+    document_service.delete_document(db, file_id, current_user.id)
     return {"message": "File deletion attempted", "file_id": file_id}

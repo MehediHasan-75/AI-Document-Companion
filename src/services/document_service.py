@@ -92,4 +92,45 @@ class DocumentService:
         }
 
 
+    def get_document(self, db: Session, doc_id: str, user_id: str) -> Optional[dict]:
+        """Return a single document as a FileItem dict, or None if not found."""
+        doc = (
+            db.query(Document)
+            .filter(
+                Document.id == doc_id,
+                Document.user_id == user_id,
+                Document.status != DocumentStatus.DELETED,
+            )
+            .first()
+        )
+        if not doc:
+            return None
+        return {
+            "id": doc.id,
+            "filename": doc.filename,
+            "status": doc.status.value,
+            "created_at": doc.created_at.isoformat(),
+            "type": doc.doc_type.value,
+            "file_size": doc.file_size,
+            "page_count": doc.page_count,
+            "chunk_count": doc.chunk_count,
+            "image_count": doc.image_count,
+            "table_count": doc.table_count,
+        }
+
+    def delete_document(self, db: Session, doc_id: str, user_id: str) -> bool:
+        """Hard-delete a Document row. Returns True if a record was deleted."""
+        doc = (
+            db.query(Document)
+            .filter(Document.id == doc_id, Document.user_id == user_id)
+            .first()
+        )
+        if not doc:
+            return False
+        db.delete(doc)
+        db.commit()
+        logger.info("Document record deleted: %s for user %s", doc_id, user_id)
+        return True
+
+
 document_service: DocumentService = DocumentService()

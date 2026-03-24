@@ -43,11 +43,11 @@ def get_text_llm() -> ChatOllama:
 
 
 def get_qa_llm() -> ChatOllama:
-    """Singleton LLM for QA (higher temperature for fluent synthesis)."""
+    """Singleton LLM for QA (Ollama)."""
     global _qa_llm
     if _qa_llm is None:
         _qa_llm = ChatOllama(
-            model=VISION_MODEL,
+            model=settings.OLLAMA_MODEL,
             base_url=settings.OLLAMA_HOST,
             temperature=QA_TEMPERATURE,
         ).with_retry(stop_after_attempt=LLM_MAX_RETRIES)

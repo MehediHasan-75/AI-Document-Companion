@@ -47,13 +47,13 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 @app.middleware("http")
 async def skip_gzip_for_sse(request: Request, call_next):
     """Disable GZip for SSE streaming endpoints.
-
+    GZip middleware looks at the Accept-Encoding header to decide if it should compress.
+    
     GZip buffers small chunks before compressing, which kills
     token-by-token streaming. We strip the Accept-Encoding header
     for SSE paths so the GZip middleware passes them through uncompressed.
     """
     if request.url.path.endswith("/ask"):
-        # Remove Accept-Encoding so GZipMiddleware won't compress
         scope = request.scope
         headers = [(k, v) for k, v in scope["headers"] if k != b"accept-encoding"]
         scope["headers"] = headers

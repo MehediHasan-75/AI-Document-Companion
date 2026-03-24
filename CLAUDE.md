@@ -73,3 +73,11 @@ Register → bcrypt hash → JWT issued (HS256, 24h expiry). Protected routes us
 ### Database
 
 SQLAlchemy 2.0+ with SQLite (dev) or PostgreSQL (prod). Tables auto-created on startup via `init_db()`. Models: User, Document, Chunk, Conversation, Message.
+
+**`Document` metadata fields:** `file_size` (bytes), `page_count`, `chunk_count` (total, stored on mark_processed), `status`, `error_message`, `processed_at`.
+
+**`Chunk` types:** `text`, `table`, `image`, `code`, `heading` (via `ChunkType` enum). `image_count` and `table_count` are derived at query time via a single GROUP BY on the chunks table — not stored on Document — so they always reflect the live chunk records.
+
+### `/files` List Response
+
+`GET /files` returns `FileItem` objects with: `id`, `filename`, `status`, `created_at`, `type`, `file_size`, `page_count`, `chunk_count`, `image_count`, `table_count`. Counts are `null` for unprocessed files. Image/table counts use one extra aggregation query (not N+1).

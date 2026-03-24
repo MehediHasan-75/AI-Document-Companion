@@ -39,6 +39,11 @@ class FileItem(BaseModel):
     status: str
     created_at: str
     type: str
+    file_size: Optional[int] = None
+    page_count: Optional[int] = None
+    chunk_count: Optional[int] = None
+    image_count: Optional[int] = None
+    table_count: Optional[int] = None
 
 
 class FileListResponse(BaseModel):

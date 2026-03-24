@@ -22,7 +22,12 @@ def _extract_base64(el: Element) -> str | None:
 def separate_elements(
     chunks: List[Element],
 ) -> Tuple[List[Element], List[Element]]:
-    """Separate document chunks into text (CompositeElement) and table elements."""
+    """Separate document chunks into text (CompositeElement) and table elements.
+
+    chunk_by_title() can wrap Table elements inside CompositeElement.orig_elements.
+    Those nested tables are extracted separately so they are summarized as tables
+    (with text_as_html) rather than being lost inside a text chunk.
+    """
     texts: List[Element] = []
     tables: List[Element] = []
 
@@ -32,6 +37,12 @@ def separate_elements(
             tables.append(chunk)
         elif name == "CompositeElement":
             texts.append(chunk)
+            # Also pull out any Table elements nested in orig_elements
+            orig = getattr(getattr(chunk, "metadata", None), "orig_elements", None)
+            if orig:
+                for el in orig:
+                    if _element_type(el) == "Table":
+                        tables.append(el)
 
     logger.debug(
         "Separated %d chunks into %d texts and %d tables",

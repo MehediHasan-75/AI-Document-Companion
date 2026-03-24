@@ -7,5 +7,9 @@ uploads/
 public/
 chroma_db/
 *.db
+*.db-shm
+*.db-wal
+docstore.json
 meh.md
 todo.md
+chat_test.md

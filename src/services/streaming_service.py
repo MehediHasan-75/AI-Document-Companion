@@ -74,6 +74,7 @@ async def stream_chat_response(
 
     full_response = ""
     sources: List[Dict[str, Any]] = []
+    in_thinking = False
 
     try:
         vectorstore = get_vectorstore()
@@ -95,7 +96,22 @@ async def stream_chat_response(
 
             elif kind == "on_chat_model_stream":
                 token = event["data"]["chunk"].content
-                if token:
+                if not token:
+                    continue
+
+                if "<think>" in token and not in_thinking:
+                    in_thinking = True
+
+                if in_thinking:
+                    yield _sse({"type": "thinking", "content": token})
+                    if "</think>" in token:
+                        in_thinking = False
+                        # Content after </think> in the same token goes to delta
+                        after = token.split("</think>", 1)[1]
+                        if after:
+                            full_response += after
+                            yield _sse({"type": "delta", "content": after})
+                else:
                     full_response += token
                     yield _sse({"type": "delta", "content": token})
 

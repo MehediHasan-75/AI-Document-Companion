@@ -65,7 +65,13 @@ class ProcessService:
         }
 
     def _update_document_status(
-        self, file_id: str, status: DocumentStatus, error: Optional[str] = None
+        self,
+        file_id: str,
+        status: DocumentStatus,
+        error: Optional[str] = None,
+        chunk_count: int = 0,
+        image_count: Optional[int] = None,
+        table_count: Optional[int] = None,
     ) -> None:
         """Update the Document row status using a standalone session."""
         db = SessionLocal()
@@ -73,7 +79,11 @@ class ProcessService:
             doc = db.query(Document).filter(Document.id == file_id).first()
             if doc:
                 if status == DocumentStatus.PROCESSED:
-                    doc.mark_processed()
+                    doc.mark_processed(
+                        chunk_count=chunk_count,
+                        image_count=image_count,
+                        table_count=table_count,
+                    )
                 elif status == DocumentStatus.FAILED:
                     doc.mark_failed(error or "Unknown error")
                 elif status == DocumentStatus.PROCESSING:
@@ -91,9 +101,15 @@ class ProcessService:
         """Execute the ingestion pipeline, updating status on completion or failure."""
         logger.info("Starting pipeline for file %s (user %s)", file_id, user_id)
         try:
-            ingest_document_pipeline(file_path, user_id=user_id)
+            result = ingest_document_pipeline(file_path, user_id=user_id)
             self._write_status(file_id, DocumentStatus.PROCESSED)
-            self._update_document_status(file_id, DocumentStatus.PROCESSED)
+            self._update_document_status(
+                file_id,
+                DocumentStatus.PROCESSED,
+                chunk_count=result["chunk_count"],
+                image_count=result["image_count"],
+                table_count=result["table_count"],
+            )
             logger.info("Pipeline completed successfully for %s", file_id)
         except Exception as exc:
             logger.exception("Pipeline failed for %s: %s", file_id, str(exc))

@@ -23,6 +23,9 @@ logger = logging.getLogger(__name__)
 class IngestionResult(TypedDict):
     retriever: VectorStoreRetriever
     docstore: SimpleDocStore
+    chunk_count: int
+    image_count: int
+    table_count: int
 
 
 def ingest_document_pipeline(
@@ -81,7 +84,7 @@ def ingest_document_pipeline(
     docstore = get_docstore()
     retriever, id_key = get_multi_vector_retriever(vectorstore, user_id=user_id)
 
-    add_documents_to_retriever(
+    counts = add_documents_to_retriever(
         vectorstore,
         docstore,
         texts,
@@ -94,6 +97,13 @@ def ingest_document_pipeline(
         user_id=user_id,
     )
 
+    total_chunks = counts["texts"] + counts["tables"] + counts["images"]
     logger.info("Ingestion pipeline completed for %s", file_path)
 
-    return {"retriever": retriever, "docstore": docstore}
+    return {
+        "retriever": retriever,
+        "docstore": docstore,
+        "chunk_count": total_chunks,
+        "image_count": counts["images"],
+        "table_count": counts["tables"],
+    }

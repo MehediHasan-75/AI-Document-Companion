@@ -48,6 +48,8 @@ class Document(Base, UUIDMixin, TimestampMixin):
     file_size: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     page_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     chunk_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    image_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    table_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     status: Mapped[DocumentStatus] = mapped_column(
         SQLEnum(DocumentStatus), default=DocumentStatus.UPLOADED, nullable=False, index=True,
     )
@@ -65,10 +67,18 @@ class Document(Base, UUIDMixin, TimestampMixin):
         self.status = DocumentStatus.PROCESSING
         self.error_message = None
 
-    def mark_processed(self, chunk_count: int = 0, page_count: int | None = None) -> None:
+    def mark_processed(
+        self,
+        chunk_count: int = 0,
+        page_count: int | None = None,
+        image_count: int | None = None,
+        table_count: int | None = None,
+    ) -> None:
         self.status = DocumentStatus.PROCESSED
         self.chunk_count = chunk_count
         self.page_count = page_count
+        self.image_count = image_count
+        self.table_count = table_count
         self.processed_at = datetime.utcnow()
         self.error_message = None
 

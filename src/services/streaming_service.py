@@ -123,9 +123,12 @@ async def stream_chat_response(
             user_id, sources=sources,
         )
 
+    images = [s["image_base64"] for s in sources if s.get("image_base64")]
+
     yield _sse({
         "type": "complete",
         "content": full_response,
         "conversation_id": conversation_id,
         "sources": sources,
+        "images": images,
     })

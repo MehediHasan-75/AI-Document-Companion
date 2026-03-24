@@ -65,9 +65,14 @@ def parse_docs(docs: List[Document]) -> Dict[str, List[Any]]:
 
 
 def _build_context_text(text_docs: List[Document]) -> str:
-    """Build numbered source context within the token budget."""
+    """Build numbered source context within the token budget.
+
+    Image sources are labeled [Image N] so the LLM can cite them distinctly
+    and the frontend knows which citations map to renderable images.
+    """
     context_parts: List[str] = []
     token_count = 0
+    img_counter = 0
     for i, doc in enumerate(text_docs, 1):
         if not hasattr(doc, "page_content"):
             continue
@@ -75,7 +80,12 @@ def _build_context_text(text_docs: List[Document]) -> str:
         doc_tokens = len(content) // 4
         if token_count + doc_tokens > MAX_CONTEXT_TOKENS:
             break
-        context_parts.append(f"[Source {i}]\n{content}")
+        if doc.metadata.get("type") == "image":
+            img_counter += 1
+            label = f"[Image {img_counter}]"
+        else:
+            label = f"[Source {i}]"
+        context_parts.append(f"{label}\n{content}")
         token_count += doc_tokens
 
     return "\n---\n".join(context_parts) if context_parts else "No relevant context found."

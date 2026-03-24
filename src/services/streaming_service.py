@@ -45,6 +45,7 @@ def _extract_sources(context: Dict[str, List[Any]]) -> List[Dict[str, Any]]:
             "original": original,
             "type": metadata.get("type", "text"),
             "doc_id": doc_id,
+            "image_base64": metadata.get("image_base64"),
         })
     return sources
 

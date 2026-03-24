@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any, Dict, List
 
@@ -33,7 +34,20 @@ def resolve_originals(docs: List[Document]) -> List[Document]:
     for doc in docs:
         doc_id = doc.metadata.get(DEFAULT_ID_KEY)
         original = lookup.get(doc_id) if doc_id else None
-        if original and doc.metadata.get("type") != "image":
+        if doc.metadata.get("type") == "image":
+            # Parse stored JSON to get base64 URL and summary for LLM context
+            metadata = {**doc.metadata}
+            content = doc.page_content  # fallback: summary already in ChromaDB doc
+            if original:
+                try:
+                    img_data = json.loads(original)
+                    metadata["image_base64"] = img_data.get("base64")
+                    content = img_data.get("summary", content)
+                except (json.JSONDecodeError, AttributeError):
+                    # Legacy entry: raw base64 string (pre-migration)
+                    metadata["image_base64"] = f"data:image/jpeg;base64,{original}"
+            resolved.append(Document(page_content=content, metadata=metadata))
+        elif original:
             metadata = {**doc.metadata, "summary": doc.page_content}
             resolved.append(Document(page_content=original, metadata=metadata))
         else:

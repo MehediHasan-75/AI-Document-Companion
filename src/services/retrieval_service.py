@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
@@ -134,7 +135,14 @@ def add_documents_to_retriever(
             for i, summary in enumerate(image_summaries)
         ]
         vectorstore.add_documents(summary_docs)
-        docstore.mset(list(zip(img_ids, images)))
+        img_entries = [
+            json.dumps({
+                "base64": f"data:image/jpeg;base64,{img}",
+                "summary": image_summaries[i],
+            })
+            for i, img in enumerate(images)
+        ]
+        docstore.mset(list(zip(img_ids, img_entries)))
         counts["images"] = len(images)
         logger.info("Added %d images", len(images))
 

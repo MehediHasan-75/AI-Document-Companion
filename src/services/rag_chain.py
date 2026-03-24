@@ -42,17 +42,12 @@ def resolve_originals(docs: List[Document]) -> List[Document]:
 
 
 def parse_docs(docs: List[Document]) -> Dict[str, List[Any]]:
-    """Split retrieved documents into base64-encoded images and text documents."""
-    b64_images: List[str] = []
-    text_docs: List[Document] = []
+    """Split retrieved documents into text documents (no multimodal path for text-only LLMs).
 
-    for doc in docs:
-        if doc.metadata.get("type") == "image":
-            b64_images.append(doc.page_content)
-        else:
-            text_docs.append(doc)
-
-    return {"images": b64_images, "texts": text_docs}
+    Image chunks keep their LLM-generated summary as page_content (set by resolve_originals),
+    so all docs are routed as text context.
+    """
+    return {"images": [], "texts": docs}
 
 
 def _build_context_text(text_docs: List[Document]) -> str:

@@ -36,6 +36,7 @@ The architecture is intentionally layered. Every design decision has a concrete 
 | **DB-backed chat memory** instead of LangChain's `RunnableWithMessageHistory` | LangChain memory has no user-scoping, no source tracking, no soft-delete | Manual history injection into prompts |
 | **Title-based chunking** via `chunk_by_title()` instead of `RecursiveCharacterTextSplitter` | Character splitting cuts across table rows, bullet items, and section boundaries | Depends on Unstructured's layout model quality |
 | **User-scoped vector retrieval** — `user_id` metadata filter on ChromaDB | Without it, User A's queries could surface User B's documents | Every ingestion and retrieval call must pass `user_id` |
+| **Document-scoped retrieval** — optional `doc_ids` filter on `/ask` | Frontend can restrict answers to a specific subset of documents | Chunks must have `document_id` in Chroma metadata (set at ingestion); old chunks without it won't match |
 | **Full pipeline SSE streaming via `astream_events()`** | Users wait 3-5s with no feedback; streaming shows status per step + tokens immediately | More complex client integration (SSE parsing + status event handling) |
 | **`<user_question>` XML tags** in RAG prompt | Prompt injection — user can embed "ignore all instructions" in their question | Not bulletproof, but raises the bar significantly |
 | **Sync `def` routes** (not `async def`) | All I/O is synchronous (SQLAlchemy ORM, Ollama HTTP, file ops); `async def` with sync calls freezes the event loop | Cannot use async LangChain methods (`.ainvoke()`) without full async migration |
@@ -113,7 +114,8 @@ INGESTION (background, per document)
               Summaries ──▶ ChromaDB             Originals ──▶ SQLite
               (all-MiniLM-L6-v2, 384d)            DocStore (WAL mode)
               + metadata: {doc_id,                 keyed by doc_id
-                type, user_id}
+                type, user_id,
+                document_id}
 
 
 QUERY (per question, ~2-5s)
@@ -329,15 +331,16 @@ Route handler
 > **TL;DR:** `POST /conversations/{id}/ask` streams the entire RAG pipeline via SSE — status events for each step (retrieval, resolving originals, building prompt) plus token-by-token LLM output. Uses LangChain's `astream_events()` on a full LCEL chain. Messages and sources are persisted to the conversation.
 
 ```
-POST /conversations/{id}/ask  {question}
+POST /conversations/{id}/ask  {"question": "...", "doc_ids": ["uuid", ...] | null}
          ↓
   1. Validate conversation ownership
   2. Load chat history from DB
   3. Save user message
-  4. Build LCEL chain: retriever → resolve_originals → parse_docs → build_prompt → llm
-  5. chain.astream_events() → status per step + delta per token
-  6. Save assistant message + sources to DB
-  7. Send complete event
+  4. Build retriever (user-scoped; further scoped to doc_ids if provided)
+  5. Build LCEL chain: retriever → resolve_originals → parse_docs → build_prompt → llm
+  6. chain.astream_events() → status per step + delta per token
+  7. Save assistant message + sources to DB
+  8. Send complete event
 ```
 
 **Key design choices:**
@@ -392,6 +395,7 @@ POST /conversations/{id}/ask  {question}
 | `POST` | `/auth/login` | — | Login (form: `username`, `password`). Returns JWT. |
 | `GET` | `/auth/me` | ✓ | Current authenticated user. |
 | `GET` | `/files` | ✓ | List all uploaded files (supports `?page=&limit=`). |
+| `GET` | `/files/{file_id}` | ✓ | Get a single file's metadata and stats. |
 | `POST` | `/files/upload` | ✓ | Upload a single document. Returns `file_id`. |
 | `POST` | `/files/upload/multiple` | ✓ | Batch upload. Returns per-file results. |
 | `POST` | `/files/process/{file_id}` | ✓ | Trigger async ingestion pipeline (user-scoped). |
@@ -496,6 +500,12 @@ curl -N -X POST http://localhost:8000/conversations/$CONV_ID/ask \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"question": "Summarise the methodology section."}'
+
+# Optionally scope to specific documents:
+curl -N -X POST http://localhost:8000/conversations/$CONV_ID/ask \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"question": "What is this paper about?", "doc_ids": ["'"$FILE_ID"'"]}'
 ```
 
 ---

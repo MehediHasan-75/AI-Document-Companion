@@ -1093,6 +1093,7 @@ Visit `http://localhost:8000/docs` in your browser. You'll see:
 | Method | Path | Auth | Request | Response | Status |
 |--------|------|------|---------|----------|--------|
 | GET | `/files` | Yes | Optional query params: `page`, `limit` | `{files[], total, page, limit}` | 200 |
+| GET | `/files/{file_id}` | Yes | Path param | `FileItem` (same shape as list items) | 200 |
 | POST | `/files/upload` | Yes | `multipart/form-data` (single file) | `{message, file_id}` | 201 |
 | POST | `/files/upload/multiple` | Yes | `multipart/form-data` (multiple files) | `{message, files[]}` | 201 |
 | DELETE | `/files/delete?file_id=...` | Yes | Query param: `file_id` | `{message, file_id}` | 200 |
@@ -1117,9 +1118,11 @@ Visit `http://localhost:8000/docs` in your browser. You'll see:
 **`/conversations/{id}/ask` streams token-by-token via SSE.** Request body:
 ```json
 {
-  "question": "What are my documents about?"
+  "question": "What are my documents about?",
+  "doc_ids": ["uuid-1", "uuid-2"]
 }
 ```
+`doc_ids` is optional. When provided, retrieval is scoped to those specific documents (Chroma `$and` filter on `user_id` + `document_id`). Omit or pass `null` to search across all user documents.
 
 **SSE event types:**
 - `{"type": "delta", "content": "..."}` — incremental LLM token

@@ -11,8 +11,12 @@ Rules:
 from multiple sources, cite each one.
 3. If the context lacks sufficient information, respond exactly: \
 "I don't have enough information to answer that based on the available documents."
-4. Keep answers concise, specific, and well-structured. Use bullet points or numbered lists \
-for multi-part answers.
+4. Format your response in well-structured Markdown. Use:
+   - Bullet points or numbered lists for multi-part answers
+   - Fenced code blocks (```language) for any code, commands, or file contents
+   - Tables for structured/comparative data
+   - **Bold** for key terms or important values
+   Keep answers concise and specific.
 5. When the context includes tables, preserve key data points, column relationships, and \
 numerical values in your answer.
 6. When the context includes images, incorporate their visual information naturally into \

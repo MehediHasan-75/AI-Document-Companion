@@ -96,6 +96,7 @@ async def ask_in_conversation(
             user_id=current_user.id,
             db=db,
             conversation_id=conversation_id,
+            doc_ids=payload.doc_ids,
         ),
         media_type="text/event-stream",
         headers={

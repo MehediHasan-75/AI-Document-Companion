@@ -465,11 +465,12 @@ This is the most important architectural concept in the system. We store the sam
                     │  │          │  0.87,   │   │
                     │  │          │  ...]    │   │
                     │  ├──────────┼─────────┤   │
-                    │  │ metadata:           │   │
-                    │  │  doc_id: "abc-123"  │   │  ◄── Used for SEARCHING
-                    │  │  type: "text"       │   │      (find relevant content)
-                    │  │  user_id: "usr-456" │   │
-                    │  └────────────────────┘   │
+                    │  │ metadata:                │   │
+                    │  │  doc_id: "abc-123"       │   │  ◄── Used for SEARCHING
+                    │  │  type: "text"            │   │      (find relevant content)
+                    │  │  user_id: "usr-456"      │   │
+                    │  │  document_id: "file-uuid" │   │
+                    │  └──────────────────────────┘   │
                     └────────────────────────────┘
 
                               │
@@ -507,9 +508,10 @@ summary_docs = [
     Document(
         page_content=summary,                        # The summary text
         metadata={
-            "doc_id": text_ids[i],                   # Link to docstore
+            "doc_id": text_ids[i],                   # Link to docstore (chunk-level UUID)
             "type": "text",                          # Content type
-            "user_id": user_id,                      # Owner (for filtering)
+            "user_id": user_id,                      # Owner (for user-scoped filtering)
+            "document_id": document_id,              # Source document (for doc-scoped filtering)
         },
     )
     for i, summary in enumerate(text_summaries)
@@ -662,23 +664,35 @@ The result: you get diverse, relevant content instead of redundant copies.
 
 ### User-Scoped Retrieval
 
-Every document is tagged with a `user_id` in its metadata during ingestion:
+Every document is tagged with a `user_id` and `document_id` in its metadata during ingestion:
 
 ```python
 metadata={
     "doc_id": text_ids[i],
     "type": "text",
-    "user_id": user_id,    # ← tagged at ingestion time
+    "user_id": user_id,          # ← owner, tagged at ingestion time
+    "document_id": document_id,  # ← source file UUID, tagged at ingestion time
 }
 ```
 
-At query time, we filter by user:
+At query time, `get_multi_vector_retriever()` builds the filter based on what's provided:
 
 ```python
+# User-only (default — all user documents):
 search_kwargs={"filter": {"user_id": current_user_id}}
+
+# User + specific documents (doc-scoped chat):
+search_kwargs={"filter": {
+    "$and": [
+        {"user_id": {"$eq": current_user_id}},
+        {"document_id": {"$in": doc_ids}},
+    ]
+}}
 ```
 
 **ChromaDB applies this filter before the vector search**, so User A never sees User B's documents — even if they're semantically similar. This is a security boundary, not just a convenience filter.
+
+**Document-scoped retrieval** is triggered when the frontend sends `doc_ids` in the `/ask` request body. This allows the user to ask questions scoped to a specific subset of their uploaded files. Only chunks with a `document_id` field in Chroma metadata support this — chunks ingested before this feature was added will not match a doc-scoped query.
 
 ### The `resolve_originals` Step
 
@@ -1280,13 +1294,28 @@ This tells the LLM "the text inside these tags is data, not instructions." It's 
 
 ### User-Scoped Retrieval
 
-Every document is tagged with its owner's `user_id` in ChromaDB metadata. At query time, the retriever filters by user:
+Every document is tagged with its owner's `user_id` in ChromaDB metadata. At query time, the retriever always filters by user:
 
 ```python
 search_kwargs={"filter": {"user_id": current_user_id}}
 ```
 
 Without this, User A could ask a question and receive answers from User B's confidential documents. The filter ensures **complete data isolation** between users at the vector store level.
+
+### Document-Scoped Retrieval
+
+Clients can optionally narrow the retrieval to a specific set of documents by passing `doc_ids` in the `/ask` request body. When present, `get_multi_vector_retriever()` builds a Chroma `$and` filter:
+
+```python
+search_kwargs={"filter": {
+    "$and": [
+        {"user_id": {"$eq": current_user_id}},
+        {"document_id": {"$in": doc_ids}},
+    ]
+}}
+```
+
+`document_id` is the same UUID used in the `/files` routes — it's stored in Chroma chunk metadata at ingestion time via `add_documents_to_retriever()`. Chunks ingested before this feature was added don't have `document_id` and will not appear in doc-scoped queries; re-processing those files restores the metadata.
 
 ### Input Validation
 

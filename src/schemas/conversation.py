@@ -14,6 +14,7 @@ class CreateConversationRequest(BaseModel):
 
 class ChatRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=MAX_QUESTION_LENGTH)
+    doc_ids: list[str] | None = None
 
 
 class ConversationResponse(BaseModel):

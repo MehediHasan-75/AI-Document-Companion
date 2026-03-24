@@ -21,19 +21,31 @@ def get_multi_vector_retriever(
     search_type: str = DEFAULT_SEARCH_TYPE,
     search_k: int = DEFAULT_SEARCH_K,
     user_id: Optional[str] = None,
+    doc_ids: Optional[List[str]] = None,
 ) -> Tuple[VectorStoreRetriever, str]:
     """Create a retriever from a vectorstore with optional user-scoping.
 
     Uses MMR (Maximal Marginal Relevance) by default to ensure diversity
     in retrieved results — avoids returning 5 near-duplicate chunks.
+    When doc_ids is provided, retrieval is further scoped to those documents.
     """
     id_key = DEFAULT_ID_KEY
 
     search_kwargs: Dict[str, Any] = {"k": search_k}
     if search_type == "mmr":
         search_kwargs["fetch_k"] = DEFAULT_FETCH_K
-    if user_id:
+
+    if user_id and doc_ids:
+        search_kwargs["filter"] = {
+            "$and": [
+                {"user_id": {"$eq": user_id}},
+                {"document_id": {"$in": doc_ids}},
+            ]
+        }
+    elif user_id:
         search_kwargs["filter"] = {"user_id": user_id}
+    elif doc_ids:
+        search_kwargs["filter"] = {"document_id": {"$in": doc_ids}}
 
     retriever = vectorstore.as_retriever(
         search_type=search_type,
@@ -53,16 +65,21 @@ def add_documents_to_retriever(
     image_summaries: Optional[List[str]] = None,
     id_key: str = DEFAULT_ID_KEY,
     user_id: Optional[str] = None,
+    document_id: Optional[str] = None,
 ) -> Dict[str, int]:
     """Index documents: summaries in vector store, originals in doc store.
 
     When user_id is provided, it is stored in metadata so retrieval can be
     scoped per-user via Chroma's metadata filtering.
+    When document_id is provided, it is stored so retrieval can be scoped
+    to specific documents via doc_ids filter.
     """
     counts = {"texts": 0, "tables": 0, "images": 0}
     base_meta: Dict[str, Any] = {}
     if user_id:
         base_meta["user_id"] = user_id
+    if document_id:
+        base_meta["document_id"] = document_id
 
     if texts and text_summaries:
         if len(texts) != len(text_summaries):

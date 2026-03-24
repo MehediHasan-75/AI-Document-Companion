@@ -85,14 +85,14 @@ This is the central HTTP layer. Every API call goes through here.
 | `getConversation(id)`                | GET    | `/conversation/{id}`      | —                                   |                                               |
 | `deleteConversation(id)`             | DELETE | `/conversation/{id}`      | —                                   |                                               |
 | `sendQuery(question, conversationId)` | POST   | `/query/`                 | JSON `{ question, conversation_id }` | `conversation_id` is optional — omit if null |
-| `askStreaming(question, conversationId, onDelta, onComplete, onError)` | POST | `/conversations/{id}/ask` | JSON `{ question }` | SSE streaming — see below |
+| `askStreaming(question, conversationId, callbacks, docIds?)` | POST | `/conversations/{id}/ask` | JSON `{ question, doc_ids? }` | SSE streaming — see below |
 
 ### `askStreaming` — SSE Streaming Chat
 
 The conversation `/ask` endpoint streams tokens via SSE. This function parses the stream and calls callbacks as tokens arrive — giving a ChatGPT-like experience:
 
 ```js
-async function askStreaming(question, conversationId, { onDelta, onComplete, onError }) {
+async function askStreaming(question, conversationId, { onDelta, onComplete, onError }, docIds = null) {
   const token = localStorage.getItem("token");
 
   const response = await fetch(
@@ -103,7 +103,7 @@ async function askStreaming(question, conversationId, { onDelta, onComplete, onE
         "Content-Type": "application/json",
         "Authorization": `Bearer ${token}`,
       },
-      body: JSON.stringify({ question }),
+      body: JSON.stringify({ question, ...(docIds ? { doc_ids: docIds } : {}) }),
     }
   );
 
@@ -139,6 +139,7 @@ async function askStreaming(question, conversationId, { onDelta, onComplete, onE
 ```js
 const [text, setText] = useState("");
 
+// Search across all user documents:
 askStreaming(question, activeConversationId, {
   onDelta: (token) => setText((prev) => prev + token),
   onComplete: (full, sources) => {
@@ -147,6 +148,13 @@ askStreaming(question, activeConversationId, {
   },
   onError: (msg) => setError(msg),
 });
+
+// Scope to specific documents (doc-scoped chat):
+askStreaming(question, activeConversationId, {
+  onDelta: (token) => setText((prev) => prev + token),
+  onComplete: (full, sources) => { setSources(sources); setLoading(false); },
+  onError: (msg) => setError(msg),
+}, selectedDocIds);  // string[] | null
 ```
 
 ---

@@ -101,7 +101,7 @@ class ProcessService:
         """Execute the ingestion pipeline, updating status on completion or failure."""
         logger.info("Starting pipeline for file %s (user %s)", file_id, user_id)
         try:
-            result = ingest_document_pipeline(file_path, user_id=user_id)
+            result = ingest_document_pipeline(file_path, user_id=user_id, document_id=file_id)
             self._write_status(file_id, DocumentStatus.PROCESSED)
             self._update_document_status(
                 file_id,

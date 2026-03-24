@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, AsyncGenerator, Dict, List
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
@@ -54,6 +54,7 @@ async def stream_chat_response(
     user_id: str,
     db: Session,
     conversation_id: str,
+    doc_ids: Optional[List[str]] = None,
 ) -> AsyncGenerator[str, None]:
     """Stream the full RAG pipeline as SSE events via astream_events().
 
@@ -76,7 +77,7 @@ async def stream_chat_response(
 
     try:
         vectorstore = get_vectorstore()
-        retriever, _ = get_multi_vector_retriever(vectorstore, user_id=user_id)
+        retriever, _ = get_multi_vector_retriever(vectorstore, user_id=user_id, doc_ids=doc_ids)
         chain = build_rag_chain(retriever, question, history)
 
         async for event in chain.astream_events(question, version="v2"):

@@ -32,6 +32,7 @@ def ingest_document_pipeline(
     file_path: str,
     max_concurrency: int = DEFAULT_MAX_CONCURRENCY,
     user_id: Optional[str] = None,
+    document_id: Optional[str] = None,
 ) -> IngestionResult:
     """
     Run the full ingestion pipeline for a document:
@@ -95,6 +96,7 @@ def ingest_document_pipeline(
         image_summaries,
         id_key,
         user_id=user_id,
+        document_id=document_id,
     )
 
     total_chunks = counts["texts"] + counts["tables"] + counts["images"]

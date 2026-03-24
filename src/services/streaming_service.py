@@ -99,14 +99,13 @@ async def stream_chat_response(
                 if not token:
                     continue
 
-                if "<think>" in token and not in_thinking:
+                if "<think>" in token:
                     in_thinking = True
 
                 if in_thinking:
-                    yield _sse({"type": "thinking", "content": token})
+                    # Discard thinking tokens — only emit content after </think>
                     if "</think>" in token:
                         in_thinking = False
-                        # Content after </think> in the same token goes to delta
                         after = token.split("</think>", 1)[1]
                         if after:
                             full_response += after

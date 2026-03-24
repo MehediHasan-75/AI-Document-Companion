@@ -74,10 +74,31 @@ engine = create_db_engine()
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
+def _apply_migrations() -> None:
+    """Add columns that may be missing from existing SQLite databases."""
+    migrations = [
+        ("documents", "image_count", "INTEGER"),
+        ("documents", "table_count", "INTEGER"),
+    ]
+    with engine.connect() as conn:
+        for table, column, col_type in migrations:
+            try:
+                conn.execute(
+                    __import__("sqlalchemy").text(
+                        f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"
+                    )
+                )
+                conn.commit()
+                logger.info("Migration applied: added %s.%s", table, column)
+            except Exception:
+                pass  # column already exists
+
+
 def init_db() -> None:
     """Create all database tables."""
     from src.models import document, conversation, message, chunk, user  # noqa: F401
     Base.metadata.create_all(bind=engine)
+    _apply_migrations()
     logger.info("Database tables created")
 
 

@@ -60,6 +60,7 @@ async def stream_chat_response(
 
     Protocol:
       {"type": "status", "content": "<step label>"}   — pipeline step started
+      {"type": "thinking", "content": "<token>"}       — reasoning token (from reasoning_content)
       {"type": "delta", "content": "<token>"}          — each LLM token
       {"type": "complete", "content": "<full>",
        "conversation_id": "...", "sources": [...]}     — final message
@@ -74,7 +75,6 @@ async def stream_chat_response(
 
     full_response = ""
     sources: List[Dict[str, Any]] = []
-    in_thinking = False
 
     try:
         vectorstore = get_vectorstore()
@@ -95,22 +95,14 @@ async def stream_chat_response(
                 yield _sse({"type": "status", "content": "Generating response..."})
 
             elif kind == "on_chat_model_stream":
-                token = event["data"]["chunk"].content
-                if not token:
-                    continue
+                chunk = event["data"]["chunk"]
 
-                if "<think>" in token:
-                    in_thinking = True
+                reasoning = chunk.additional_kwargs.get("reasoning_content")
+                if reasoning:
+                    yield _sse({"type": "thinking", "content": reasoning})
 
-                if in_thinking:
-                    yield _sse({"type": "thinking", "content": token})
-                    if "</think>" in token:
-                        in_thinking = False
-                        after = token.split("</think>", 1)[1]
-                        if after:
-                            full_response += after
-                            yield _sse({"type": "delta", "content": after})
-                else:
+                token = chunk.content
+                if token:
                     full_response += token
                     yield _sse({"type": "delta", "content": token})
 

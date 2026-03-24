@@ -50,6 +50,7 @@ def get_qa_llm() -> ChatOllama:
             model=settings.OLLAMA_MODEL,
             base_url=settings.OLLAMA_HOST,
             temperature=QA_TEMPERATURE,
+            reasoning=True,
         ).with_retry(stop_after_attempt=LLM_MAX_RETRIES)
     return _qa_llm
 

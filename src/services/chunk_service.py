@@ -33,7 +33,7 @@ def separate_elements(
 
     for chunk in chunks:
         name = _element_type(chunk)
-        if name == "Table":
+        if name in ("Table", "TableChunk"):
             tables.append(chunk)
         elif name == "CompositeElement":
             texts.append(chunk)
@@ -41,7 +41,7 @@ def separate_elements(
             orig = getattr(getattr(chunk, "metadata", None), "orig_elements", None)
             if orig:
                 for el in orig:
-                    if _element_type(el) == "Table":
+                    if _element_type(el) in ("Table", "TableChunk"):
                         tables.append(el)
 
     logger.debug(

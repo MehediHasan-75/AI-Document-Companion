@@ -56,10 +56,9 @@ def resolve_originals(docs: List[Document]) -> List[Document]:
 
 
 def parse_docs(docs: List[Document]) -> Dict[str, List[Any]]:
-    """Split retrieved documents into text documents (no multimodal path for text-only LLMs).
+    """Split retrieved documents into text context only.
 
-    Image chunks keep their LLM-generated summary as page_content (set by resolve_originals),
-    so all docs are routed as text context.
+    Image docs are passed as text summaries — no vision model is used.
     """
     return {"images": [], "texts": docs}
 
@@ -127,7 +126,7 @@ def build_prompt(kwargs: Dict[str, Any]) -> List[BaseMessage]:
         question_content.append(
             {
                 "type": "image_url",
-                "image_url": {"url": f"data:image/jpeg;base64,{image}"},
+                "image_url": {"url": image},  # already a full data URL
             }
         )
 

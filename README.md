@@ -15,9 +15,29 @@
 
 ---
 
+## Demo
+
+> **TODO:** Replace with a screen recording or GIF of the SSE streaming response in action.
+> Recommended: record with [asciinema](https://asciinema.org/) or a screen capture tool, then embed here.
+
+```
+[demo.gif placeholder — upload a recording of /conversations/{id}/ask streaming tokens in the terminal or UI]
+```
+
+---
+
 ## What This Is
 
 Most RAG demos chunk plain text and call it multimodal. This pipeline handles the hard cases: PDFs with embedded tables, scanned diagrams, Word documents with mixed content. It separates text, structured tables (as HTML), and images at the element level using ML-based layout detection — then summarises each type with the appropriate model before indexing.
+
+**What you can do with it:**
+
+- Upload PDFs, Word docs, spreadsheets, PowerPoints, and 5 other formats via a REST API
+- Trigger async ingestion — layout detection, per-element summarization, dual-store indexing
+- Ask questions in persistent, named conversations — answers are grounded in cited sources
+- Stream the full pipeline token-by-token via SSE (status per step + tokens as they're generated)
+- Scope any question to a specific subset of documents
+- Run entirely offline — no external API calls; LLMs served locally via Ollama
 
 The architecture is intentionally layered. Every design decision has a concrete reason documented below.
 
@@ -456,7 +476,11 @@ DATABASE_URL=sqlite:///./app.db
 ### Run
 
 ```bash
+# From the project root — main.py re-exports src.main:app
 uvicorn main:app --reload
+
+# Alternatively, point directly at the source module
+uvicorn src.main:app --reload
 ```
 
 API at `http://localhost:8000` · Swagger UI at `http://localhost:8000/docs`
@@ -586,6 +610,24 @@ curl -N -X POST http://localhost:8000/conversations/$CONV_ID/ask \
 | HTML | `text/html` | |
 | Plain text | `text/plain` | |
 | JSON | `application/json` | |
+
+---
+
+## Known Limitations & Future Work
+
+These are current constraints worth knowing about — either engineering trade-offs or deliberate descoping.
+
+| Area | Current Limitation | Notes / Potential Fix |
+|------|-------------------|----------------------|
+| **No test suite** | Zero unit or integration tests | Priority addition; ingestion and retrieval services are the highest-value targets |
+| **Ingestion speed** | `hi_res` strategy takes ~30–90s for large PDFs | Strategy could be made configurable (`fast` for plain-text docs, `hi_res` for complex ones) |
+| **Local-only LLMs** | Requires Ollama running locally; no cloud LLM fallback | Swap `ChatOllama` for `ChatOpenAI` / `ChatAnthropic` — services are model-agnostic via LangChain |
+| **SQLite in production** | Default `DATABASE_URL` is SQLite; not suitable for multi-instance deployments | Set `DATABASE_URL` to PostgreSQL; SQLAlchemy and the schema are already compatible |
+| **Docstore is local SQLite** | The vector/docstore is file-based; not shareable across processes | Replace with a Redis or PostgreSQL-backed docstore for horizontal scaling |
+| **Status polling** | Ingestion progress is a JSON file polled by the client | Could be replaced with WebSocket push or SSE progress events |
+| **No re-ingestion** | Re-uploading the same file creates a new document; no deduplication or version diffing | Add content hash check on upload |
+| **Prompt injection** | `<user_question>` XML tags mitigate but don't eliminate prompt injection risk | Not bulletproof against adversarial inputs — output filtering would strengthen this |
+| **Image QA** | Images are described via `llava` at ingestion time; vision is not used at query time | Pass retrieved image base64 directly to a vision model at query time for richer answers |
 
 ---
 

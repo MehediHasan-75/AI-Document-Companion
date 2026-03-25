@@ -15,6 +15,26 @@
 
 ---
 
+## Table of Contents
+
+- [Demo](#demo)
+- [About](#about--why-this-project)
+- [What This Is](#what-this-is)
+- [Key Engineering Decisions](#key-engineering-decisions)
+- [System Architecture](#system-architecture)
+- [Technical Deep Dive](#technical-deep-dive)
+- [API Reference](#api-reference)
+- [Quick Start](#quick-start)
+- [Setup](#setup)
+- [Project Structure](#project-structure)
+- [Additional Documentation](#additional-documentation)
+- [Environment Variables Reference](#environment-variables-reference)
+- [Supported Document Types](#supported-document-types)
+- [Troubleshooting / FAQ](#troubleshooting--faq)
+- [Known Limitations & Future Work](#known-limitations--future-work)
+
+---
+
 ## Demo
 
 > **TODO:** Replace with a screen recording or GIF of the SSE streaming response in action.
@@ -23,6 +43,19 @@
 ```
 [demo.gif placeholder — upload a recording of /conversations/{id}/ask streaming tokens in the terminal or UI]
 ```
+
+---
+
+## About / Why This Project
+
+Most RAG tutorials stop at "embed text, retrieve, answer." This project explores what production-grade RAG actually requires: handling real documents that mix tables, scanned images, and prose; maintaining honest user-scoped data isolation at every layer; and making the full pipeline observable in real time via SSE.
+
+**The core questions this project answers:**
+- What breaks when you embed raw chunks instead of LLM-generated summaries — and how much does the dual-store pattern actually improve retrieval quality?
+- How far can a FastAPI + SQLite + local Ollama stack go before you hit real scaling walls?
+- Can a fully offline pipeline match cloud-based RAG on complex, mixed-content documents?
+
+**What this is not:** a finished product. It is a deliberately engineered backend — every architectural choice is documented with the problem it solves and the trade-off accepted. Built for learning, portfolio, and interview discussion.
 
 ---
 
@@ -429,6 +462,27 @@ POST /conversations/{id}/ask  {"question": "...", "doc_ids": ["uuid", ...] | nul
 
 Interactive docs at `http://localhost:8000/docs` — the Swagger UI **Authorize** button is wired to the JWT bearer flow.
 
+> **`/auth/login` uses form-encoded data, not JSON.** Send `username` (your email) and `password` as `application/x-www-form-urlencoded` fields. In `curl`: use `-F "username=..." -F "password=..."`. Sending a JSON body returns a `422` validation error.
+
+---
+
+## Quick Start
+
+> **Prerequisites:** Python 3.12+, [Ollama](https://ollama.com) running locally, system deps installed (see [Setup → Prerequisites](#prerequisites)).
+
+```bash
+git clone https://github.com/MehediHasan-75/AI-Document-Companion.git
+cd AI-Document-Companion
+python -m venv .venv && source .venv/bin/activate  # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+cp .env.example .env   # set SECRET_KEY and DATABASE_URL (see Environment Variables)
+uvicorn src.main:app --reload
+```
+
+API at `http://localhost:8000` · Swagger at `http://localhost:8000/docs`
+
+For full configuration options, see [Environment Variables Reference](#environment-variables-reference).
+
 ---
 
 ## Setup
@@ -438,7 +492,14 @@ Interactive docs at `http://localhost:8000/docs` — the Swagger UI **Authorize*
 ```bash
 # macOS — required by Unstructured hi_res strategy
 brew install libmagic poppler tesseract
+```
 
+```bash
+# Linux (Debian/Ubuntu)
+sudo apt-get install -y libmagic1 poppler-utils tesseract-ocr
+```
+
+```bash
 # Ollama — local LLM runtime
 curl -fsSL https://ollama.com/install.sh | sh
 ollama pull deepseek-r1:8b   # text LLM (summarization + QA)
@@ -469,8 +530,12 @@ Minimum required changes:
 # Generate with: openssl rand -hex 32
 SECRET_KEY=your-secret-key-here
 
-# SQLite works out of the box for development
+# The default in environment.py is PostgreSQL.
+# For local development, override with SQLite (no server required):
 DATABASE_URL=sqlite:///./app.db
+
+# For PostgreSQL (production or local Postgres instance):
+# DATABASE_URL=postgresql://rag_user:rag_password@localhost:5432/rag_db
 ```
 
 ### Run
@@ -542,8 +607,10 @@ curl -N -X POST http://localhost:8000/conversations/$CONV_ID/ask \
 ├── requirements.txt
 ├── .env.example
 ├── docs/
+│   ├── authentication.md           # JWT flow, bcrypt, token lifecycle, dependency chain
 │   ├── database.md                 # SQLAlchemy 2.0, sessions, mixins, relationships
 │   ├── fastapi.md                  # Middleware, DI, routing, async vs sync
+│   ├── frontend-guide.md           # SSE client integration, conversation flow, API paths
 │   └── rag-pipeline.md             # Full RAG + LangChain guide (1300+ lines)
 └── src/
     ├── main.py                     # FastAPI app, middleware stack, exception handlers
@@ -597,6 +664,44 @@ curl -N -X POST http://localhost:8000/conversations/$CONV_ID/ask \
 
 ---
 
+## Additional Documentation
+
+The `docs/` directory contains extended technical references for each subsystem:
+
+| Document | Contents |
+|----------|----------|
+| [`docs/authentication.md`](docs/authentication.md) | JWT lifecycle, bcrypt hashing, `get_current_user` dependency chain, security measures |
+| [`docs/database.md`](docs/database.md) | SQLAlchemy 2.0 patterns, session management, `UUIDMixin`/`TimestampMixin`, all model columns explained |
+| [`docs/fastapi.md`](docs/fastapi.md) | Middleware stack internals, dependency injection, sync vs async route decisions |
+| [`docs/frontend-guide.md`](docs/frontend-guide.md) | Next.js SSE client integration, conversation state, streaming protocol, API path reference |
+| [`docs/rag-pipeline.md`](docs/rag-pipeline.md) | 1300+ line deep dive: LCEL chains, `astream_events()`, multi-vector retrieval, prompt design, retry logic |
+
+---
+
+## Environment Variables Reference
+
+Copy `.env.example` to `.env` and override as needed. All variables are optional except `SECRET_KEY` (insecure default) and `DATABASE_URL` (defaults to PostgreSQL).
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SECRET_KEY` | *(insecure default)* | JWT signing key. **Must change in production.** Generate: `openssl rand -hex 32` |
+| `DATABASE_URL` | `postgresql://rag_user:rag_password@localhost:5432/rag_db` | SQLAlchemy URL. Use `sqlite:///./app.db` for local dev. |
+| `OLLAMA_HOST` | `http://localhost:11434` | Ollama server URL. Change if Ollama runs on a remote host. |
+| `OLLAMA_MODEL` | `deepseek-r1:8b` | Text LLM for summarization and QA. |
+| `EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | HuggingFace model for vector embeddings. |
+| `MAX_UPLOAD_SIZE` | `50` (MB) | Maximum file upload size in megabytes. |
+| `UPLOAD_DIR` | `./uploads` | Directory for uploaded files and ingestion status files. |
+| `CORS_ALLOWED_ORIGINS` | `["*"]` | Allowed CORS origins. Restrict to your frontend domain in production. |
+| `JWT_ALGORITHM` | `HS256` | JWT signing algorithm. |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | `1440` | Token lifetime in minutes (default: 24 hours). |
+| `DEBUG` | `False` | Enable debug mode. |
+| `LOG_LEVEL` | `INFO` | Log verbosity: `DEBUG`, `INFO`, `WARNING`, `ERROR`. |
+| `DB_POOL_SIZE` | `20` | Connection pool size (PostgreSQL only). |
+| `DB_MAX_OVERFLOW` | `40` | Max overflow connections above pool size (PostgreSQL only). |
+| `HUGGING_FACE_HUB_TOKEN` | `None` | Required only for gated HuggingFace models. |
+
+---
+
 ## Supported Document Types
 
 | Format | MIME Type | Notes |
@@ -610,6 +715,25 @@ curl -N -X POST http://localhost:8000/conversations/$CONV_ID/ask \
 | HTML | `text/html` | |
 | Plain text | `text/plain` | |
 | JSON | `application/json` | |
+
+---
+
+## Troubleshooting / FAQ
+
+**Ollama connection error during startup or ingestion**
+Ollama is not running. Run `ollama serve` in a separate terminal. If on a non-default port, set `OLLAMA_HOST=http://localhost:<port>` in `.env`.
+
+**`libmagic` / `poppler` / `tesseract` not found**
+System dependencies are missing. macOS: `brew install libmagic poppler tesseract`. Linux: `sudo apt-get install -y libmagic1 poppler-utils tesseract-ocr`.
+
+**Ingestion takes 60–90 seconds per PDF**
+Expected. The `hi_res` strategy runs ML layout detection per page — it is compute-intensive by design. For plain-text PDFs without tables or images, you can switch `DEFAULT_PARTITION_STRATEGY` in `src/config/constants.py` to `"fast"`, though this disables table and image extraction.
+
+**Retrieval returns irrelevant results**
+First confirm status is `processed` via `GET /files/status/{file_id}`. If processed, try the `doc_ids` filter on `/conversations/{id}/ask` to scope retrieval to a specific document. Rephrasing the question to match the document's vocabulary also helps.
+
+**`422 Unprocessable Entity` on `/auth/login`**
+The login endpoint requires form-encoded data (`application/x-www-form-urlencoded`), not JSON. Use `-F "username=..." -F "password=..."` in curl, or the Swagger UI **Authorize** button.
 
 ---
 
@@ -632,5 +756,13 @@ These are current constraints worth knowing about — either engineering trade-o
 ---
 
 <div align="center">
-  <sub>Built by <a href="https://github.com/MehediHasan-75">Mehedi Hasan</a></sub>
+  <sub>
+    Built by <strong>Mehedi Hasan</strong>
+    &nbsp;·&nbsp;
+    <a href="https://mehedi0.me/">Portfolio</a>
+    &nbsp;·&nbsp;
+    <a href="https://mdmehedi.tech/">Blog</a>
+    &nbsp;·&nbsp;
+    <a href="https://github.com/MehediHasan-75">GitHub</a>
+  </sub>
 </div>

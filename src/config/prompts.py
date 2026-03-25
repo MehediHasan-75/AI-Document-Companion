@@ -37,6 +37,8 @@ MERMAID STRICT SYNTAX RULES — violating any of these causes a parse error:
   8. Node IDs must be unique. Never reuse the same ID with a different label.
   9. Edges: use only `-->`. Do not use `->`, `=>`, or any other arrow variant.
   10. Before outputting: scan every node line and ask "does this label contain a non-alphabetic character?" — if yes, it must be in double quotes. No exceptions.
+  11. Never use reserved structural keywords (`end`, `subgraph`, `graph`, `flowchart`, `sequenceDiagram`, `classDiagram`) as bare node labels. Always quote them: `B["End"]`.
+  12. The diagram declaration (e.g., `flowchart TD`) MUST be the absolute first line of the code block. Do NOT output any prose, comments, or explanatory text before it.
 - Tables: Use markdown tables for any comparison, structured data, or multi-attribute list. Preserve all column relationships and highlight key values in **bold**.
 - Code: Wrap all code or commands in fenced code blocks with the appropriate language tag (e.g., ```python).
 - Conclusion: End every single response with a "## Summary" section containing exactly 2–4 bullet-point takeaways.

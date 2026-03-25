@@ -25,28 +25,83 @@ logger = logging.getLogger(__name__)
 # Characters that break Mermaid parsing when unquoted inside node labels.
 _MERMAID_UNSAFE = re.compile(r'[.()\[\]{},:#%<>\\]')
 
+# Reserved Mermaid structural keywords that must not appear as bare node labels.
+_MERMAID_RESERVED = frozenset({
+    'end', 'subgraph', 'graph', 'flowchart', 'sequenceDiagram',
+    'classDiagram', 'stateDiagram', 'erDiagram',
+})
+
+# First line of a valid Mermaid diagram.
+_DIAGRAM_DECL = re.compile(
+    r'^(flowchart|graph|sequenceDiagram|classDiagram|stateDiagram(?:-v2)?|erDiagram|gantt|pie|gitGraph|mindmap|timeline)\b',
+    re.MULTILINE | re.IGNORECASE,
+)
+
+
+def _heal_mermaid_block(code: str) -> str:
+    """Heal a single Mermaid code string.
+
+    Steps:
+    1. Strip conversational filler before the diagram declaration.
+    2. Quote unquoted node labels that contain unsafe characters or reserved keywords.
+    Covers all three common bracket types: [] () {}.
+    """
+    # 1. Strip mixed content — any prose before the first diagram keyword.
+    m = _DIAGRAM_DECL.search(code)
+    if m:
+        code = code[m.start():]
+
+    # 2. Quote unsafe / reserved labels.
+    def _maybe_quote(m: re.Match, open_b: str, close_b: str) -> str:
+        node_id, label = m.group(1), m.group(2)
+        if label.startswith('"') and label.endswith('"'):
+            return m.group(0)  # already quoted — leave untouched
+        has_unsafe = bool(_MERMAID_UNSAFE.search(label))
+        is_reserved = label.strip().lower() in _MERMAID_RESERVED
+        if has_unsafe or is_reserved:
+            safe = label.replace('"', "'")  # escape any embedded double-quotes
+            return f'{node_id}{open_b}"{safe}"{close_b}'
+        return m.group(0)
+
+    # Rectangular [label]
+    code = re.sub(
+        r'\b(\w+)\[([^"\]\[]+)\]',
+        lambda m: _maybe_quote(m, '[', ']'),
+        code,
+    )
+    # Round (label) — word boundary prevents matching --> arrows
+    code = re.sub(
+        r'\b(\w+)\(([^"\)\(]+)\)',
+        lambda m: _maybe_quote(m, '(', ')'),
+        code,
+    )
+    # Diamond / rhombus {label}
+    code = re.sub(
+        r'\b(\w+)\{([^"\}\{]+)\}',
+        lambda m: _maybe_quote(m, '{', '}'),
+        code,
+    )
+
+    return code
+
 
 def _sanitize_mermaid(text: str) -> str:
-    """Wrap unsafe Mermaid node labels in double quotes.
+    """Find and heal all Mermaid code blocks in *text*.
 
-    Finds every ```mermaid block and auto-quotes any node label of the form
-    ID[label] where the label contains characters that break Mermaid parsing.
-    Already-quoted labels (ID["label"]) are left untouched.
+    Also auto-closes any truncated (unclosed) mermaid block left by a
+    premature stream termination so Markdown parsers don't leak raw DSL.
     """
-    def fix_block(block_match: re.Match) -> str:
-        block = block_match.group(0)
+    def fix_block(m: re.Match) -> str:
+        return f'```mermaid\n{_heal_mermaid_block(m.group(1))}```'
 
-        def quote_label(m: re.Match) -> str:
-            node_id, label = m.group(1), m.group(2)
-            if _MERMAID_UNSAFE.search(label):
-                label = label.replace('"', "'")  # avoid nested quotes
-                return f'{node_id}["{label}"]'
-            return m.group(0)
+    healed = re.sub(r'```mermaid\n(.*?)```', fix_block, text, flags=re.DOTALL)
 
-        # Match unquoted rectangular labels: WORD_ID[label without existing quotes]
-        return re.sub(r'\b(\w+)\[([^"\]\[]+)\]', quote_label, block)
+    # Auto-close a truncated block at the end of the response.
+    last_open = healed.rfind('```mermaid')
+    if last_open != -1 and '```' not in healed[last_open + len('```mermaid'):]:
+        healed += '\n```'
 
-    return re.sub(r'```mermaid\n.*?```', fix_block, text, flags=re.DOTALL)
+    return healed
 
 
 _STEP_LABELS = {

@@ -23,7 +23,8 @@ DEFAULT_NEW_AFTER_N_CHARS: int = 2000
 DEFAULT_IMAGE_TYPES: list[str] = ["Image"]
 
 # LLM
-VISION_MODEL: str = "llava"
+# VISION_MODEL: str = "llava"
+VISION_MODEL: str = "qwen3-vl:8b"
 SUMMARIZATION_TEMPERATURE: float = 0.5
 QA_TEMPERATURE: float = 0.7
 VISION_TEMPERATURE: float = 0.7

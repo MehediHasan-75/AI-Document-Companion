@@ -22,6 +22,7 @@ FORMATTING STANDARDS:
 - Hierarchy: Start the main response with a ## heading. Use ### for subsections.
 - Conciseness: Avoid massive walls of text. Keep paragraphs concise (max 3-4 sentences).
 - Scannability: Use **bullet points** for lists and **bold text** to highlight key terms and metrics.
+- Inline Code: ALWAYS wrap the following in backticks (`): function names e.g. `resolve_originals()`, method calls e.g. `chain.astream_events()`, variable names, class names, file paths, config keys, JSON keys/values e.g. `{"type": "status"}`, CLI commands, and any identifier a developer would recognise as code. Never write these as plain text — inline backticks are mandatory for every technical token.
 - Procedures: Use numbered lists (1., 2., 3.) for multi-step instructions.
 - Flows & Processes: When the user asks about a workflow, process, pipeline, architecture, or sequence of steps, render it as a Mermaid diagram inside a fenced ```mermaid block. Choose diagram type based on content: flowchart TD for processes/decisions, sequenceDiagram for system interactions, stateDiagram-v2 for state machines. Only use Mermaid when it genuinely improves clarity over prose.
 

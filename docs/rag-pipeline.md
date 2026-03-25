@@ -126,7 +126,7 @@ QUERY (happens per question, takes seconds)
          │
          ▼
   ┌─────────────┐
-  │  LLM         │  llava generates answer using retrieved text and images
+  │  LLM         │  deepseek-r1:8b generates answer using retrieved context
   │  (generate)  │
   └──────┬──────┘
          │
@@ -360,7 +360,7 @@ def get_images_base64(chunks):
 |-------------|--------------------|--------------------|------------------|
 | **Text** | deepseek-r1:8b (text LLM) | LLM-generated summary | Original text |
 | **Table** | deepseek-r1:8b (text LLM) | LLM-generated summary | HTML table markup |
-| **Image** | llava (vision LLM) | LLM-generated description | Base64-encoded image |
+| **Image** | qwen3-vl:8b (vision LLM) | LLM-generated description | Base64-encoded image |
 
 ### Step 3: Summarization — Making Content Searchable
 
@@ -961,7 +961,7 @@ for image in docs_by_type.get("images", []):
 messages.append(HumanMessage(content=question_content))
 ```
 
-This creates a **multi-modal message** — the LLM receives both text and images in a single `HumanMessage`. The vision model (llava) can read charts, diagrams, and figures alongside the text context.
+This creates a **multi-modal message** — the LLM receives both text and images in a single `HumanMessage`. The vision model (`qwen3-vl:8b`) can read charts, diagrams, and figures alongside the text context.
 
 Note that images live in the **user message** (not the system message) because:
 - The system message contains the RAG rules and document context (text only)
@@ -1066,7 +1066,7 @@ The project creates three singleton LLM instances:
 ```python
 _text_llm = None    # For summarization (temperature 0.5)
 _qa_llm = None      # For answering questions (temperature 0.7)
-_vision_llm = None  # For describing images (llava model, temperature 0.7)
+_vision_llm = None  # For describing images (qwen3-vl:8b model, temperature 0.7)
 ```
 
 **Why different temperatures?**
@@ -1082,8 +1082,8 @@ Temperature 1.0: "Q3 saw impressive revenue of $4.2M!" (creative, sometimes wron
 | Task | Model | Temperature | Why |
 |------|-------|-------------|-----|
 | **Summarization** | deepseek-r1:8b | 0.5 (low) | We need factual, consistent summaries. Creative rephrasing could lose key details. |
-| **QA answers** | llava | 0.7 (moderate) | llava is a vision model — it can reason over both retrieved text and retrieved base64 images in the same prompt. |
-| **Image description** | llava | 0.7 (moderate) | Describing visuals benefits from some expressiveness. |
+| **QA answers** | deepseek-r1:8b | 0.7 (moderate) | Same model as summarization but with `reasoning=True` enabled — chain-of-thought reasoning over the retrieved context. |
+| **Image description** | qwen3-vl:8b | 0.7 (moderate) | Vision model — describes charts, diagrams, and figures at ingestion time. |
 
 **Why singletons?** Creating a `ChatOllama` object involves establishing a connection to the Ollama server. If we created a new one per request, we'd have unnecessary connection overhead. The singleton pattern creates the connection once and reuses it:
 
@@ -1135,7 +1135,7 @@ def get_qa_llm():
     global _qa_llm
     if _qa_llm is None:
         _qa_llm = ChatOllama(
-            model=VISION_MODEL,            # llava — handles both text and image context
+            model=VISION_MODEL,            # qwen3-vl:8b — vision model for image description
             base_url=settings.OLLAMA_HOST,
             temperature=QA_TEMPERATURE,
         ).with_retry(stop_after_attempt=LLM_MAX_RETRIES)  # Retry up to 3 times
@@ -1375,7 +1375,7 @@ All tunable constants are in `src/config/constants.py`:
 | `SUMMARIZATION_TEMPERATURE` | 0.5 | Low temp for factual summaries |
 | `QA_TEMPERATURE` | 0.7 | Higher temp for fluent answers |
 | `VISION_TEMPERATURE` | 0.7 | Temp for image descriptions |
-| `VISION_MODEL` | `llava` | Model for image understanding |
+| `VISION_MODEL` | `qwen3-vl:8b` | Model for image understanding |
 | `LLM_MAX_RETRIES` | 3 | Retry failed LLM calls up to 3 times |
 | `DEFAULT_MAX_CONCURRENCY` | 3 | Max parallel LLM calls during ingestion |
 

@@ -47,7 +47,7 @@ Core business logic for the AI Document Companion RAG pipeline.
 | **RagChain** | `rag_chain.py` | Build LCEL chain: retrieve → resolve originals → prompt → LLM |
 | **VectorService** | `vector_service.py` | Manage ChromaDB (embeddings) and SimpleDocStore (originals) |
 | **RetrievalService** | `retrieval_service.py` | Multi-vector retrieval: search summaries, return originals |
-| **LLMService** | `llm_service.py` | Chains for summarization (deepseek-r1), QA (llava), and image description (llava) |
+| **LLMService** | `llm_service.py` | Chains for summarization (deepseek-r1:8b, temp 0.5), QA (deepseek-r1:8b, reasoning=True), and image description (qwen3-vl:8b) |
 | **ChunkService** | `chunk_service.py` | Separate elements by type; extract base64 images |
 | **UnstructuredService** | `unstructured_service.py` | PDF parsing with hi_res strategy |
 | **StreamingService** | `streaming_service.py` | Token-by-token SSE streaming for conversation /ask |
@@ -76,7 +76,7 @@ Core business logic for the AI Document Companion RAG pipeline.
    ├── vector_service.get_docstore()              → SimpleDocStore
    └── retrieval_service.add_documents_to_retriever()
        ├── Embed summaries → ChromaDB
-       └── Store originals → docstore.db
+       └── Store originals → SQLite DocStore (WAL mode)
 
 4. STATUS UPDATE
    └── process_service._write_status() → "processed" or "failed"

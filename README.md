@@ -52,7 +52,7 @@ The architecture is intentionally layered. Every design decision has a concrete 
 | **Summary-based embedding** — LLM summaries are embedded, not raw chunks | Raw chunks have low cosine similarity to natural questions; `all-MiniLM-L6-v2` truncates at 256 tokens, losing long chunk tails | Extra LLM call per chunk at ingestion (write-time cost for read-time quality) |
 | **Dual-store architecture** — summaries in ChromaDB, originals in SQLite | Retrieval uses summaries (better semantic match), but the LLM needs full-fidelity originals for reasoning | Two stores to maintain; `resolve_originals()` step required in the pipeline |
 | **MMR search** (k=5, fetch_k=20) instead of plain similarity | Similarity search returns near-duplicate chunks from the same section | Slightly slower than pure similarity (20 candidates vs 5) |
-| **Separate QA and summarization LLMs** — different models and temperatures | Summarization (deepseek-r1, temp 0.5) needs factual extraction; QA uses llava (temp 0.7) so it can reason over both retrieved text and retrieved images | Two singleton instances consuming memory |
+| **Separate QA and summarization LLMs** — different models and temperatures | Summarization (deepseek-r1, temp 0.5) needs factual extraction; QA uses deepseek-r1:8b (temp 0.7, reasoning=True) for chain-of-thought answers; vision uses qwen3-vl:8b for image description at ingestion time | Two singleton instances consuming memory |
 | **DB-backed chat memory** instead of LangChain's `RunnableWithMessageHistory` | LangChain memory has no user-scoping, no source tracking, no soft-delete | Manual history injection into prompts |
 | **Title-based chunking** via `chunk_by_title()` instead of `RecursiveCharacterTextSplitter` | Character splitting cuts across table rows, bullet items, and section boundaries | Depends on Unstructured's layout model quality |
 | **User-scoped vector retrieval** — `user_id` metadata filter on ChromaDB | Without it, User A's queries could surface User B's documents | Every ingestion and retrieval call must pass `user_id` |
@@ -124,7 +124,7 @@ INGESTION (background, per document)
                           texts    tables    images
                             │         │         │
                             ▼         ▼         ▼
-                      deepseek-r1  deepseek  llava
+                      deepseek-r1  deepseek  qwen3-vl:8b
                       (temp 0.5)   (temp 0.5) (temp 0.7)
                             │         │         │
                             └─────────┼─────────┘
@@ -153,7 +153,7 @@ QUERY (per question, ~2-5s)
                      build_prompt()  ◄── context + history + rules
                             │           (token budget: 3000)
                             ▼           (history cap: 4 exchanges)
-                     llava (temp 0.7, with retry)
+                     deepseek-r1:8b (temp 0.7, reasoning=True, with retry)
                             │
                             ▼
                      Answer + [Source N] citations
@@ -231,7 +231,7 @@ elements = partition(
 
 Each content type hits the appropriate summarizer:
 - **Text/Tables** → `deepseek-r1:8b` (text LLM, temp 0.5)
-- **Images** → `llava` (vision LLM, temp 0.7)
+- **Images** → `qwen3-vl:8b` (vision LLM, temp 0.7)
 
 Single `partition()` call handles: PDF, DOCX, PPTX, XLSX, CSV, TXT, MD, HTML, JSON — no format-specific code paths.
 
@@ -441,8 +441,8 @@ brew install libmagic poppler tesseract
 
 # Ollama — local LLM runtime
 curl -fsSL https://ollama.com/install.sh | sh
-ollama pull deepseek-r1:8b   # text LLM (summarization)
-ollama pull llava             # vision LLM (image summarization + QA)
+ollama pull deepseek-r1:8b   # text LLM (summarization + QA)
+ollama pull qwen3-vl:8b      # vision LLM (image summarization)
 ```
 
 ### Install
@@ -627,7 +627,7 @@ These are current constraints worth knowing about — either engineering trade-o
 | **Status polling** | Ingestion progress is a JSON file polled by the client | Could be replaced with WebSocket push or SSE progress events |
 | **No re-ingestion** | Re-uploading the same file creates a new document; no deduplication or version diffing | Add content hash check on upload |
 | **Prompt injection** | `<user_question>` XML tags mitigate but don't eliminate prompt injection risk | Not bulletproof against adversarial inputs — output filtering would strengthen this |
-| **Image QA** | Images are described via `llava` at ingestion time; vision is not used at query time | Pass retrieved image base64 directly to a vision model at query time for richer answers |
+| **Image QA** | Images are described via `qwen3-vl:8b` at ingestion time; vision is not used at query time | Pass retrieved image base64 directly to a vision model at query time for richer answers |
 
 ---
 

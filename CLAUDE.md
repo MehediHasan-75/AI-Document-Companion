@@ -20,8 +20,8 @@ pip install -r requirements.txt
 brew install libmagic poppler tesseract
 
 # Pull required Ollama models
-ollama pull deepseek-r1:8b   # text summarization + RAG
-ollama pull llava              # image understanding
+ollama pull deepseek-r1:8b   # text LLM (summarization + QA)
+ollama pull qwen3-vl:8b      # vision LLM (image summarization)
 ```
 
 API docs at http://localhost:8000/docs (Swagger UI with JWT auth flow).
@@ -36,7 +36,7 @@ No test suite, linter, or formatter is currently configured.
 src/
   main.py                        # FastAPI app, middleware, exception handlers, startup (init_db)
   routes/index.py                # Aggregates all route modules
-  routes/{auth,file,process,query,conversation}_routes.py
+  routes/{auth,file,process,conversation}_routes.py
   services/                      # All business logic lives here
   models/                        # SQLAlchemy ORM models (User, Document, Chunk, Conversation, Message)
   schemas/                       # Pydantic request/response models

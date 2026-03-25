@@ -64,7 +64,7 @@ This is the central HTTP layer. Every API call goes through here.
 ### Core: `apiFetch(path, options)`
 
 - Read `NEXT_PUBLIC_API_URL` from `process.env` and prepend it to `path`
-- If `options.body` is a `FormData` instance, do NOT set `Content-Type` (browser sets multipart boundary automatically). Otherwise set `Content-Type: application/json`
+- If `options.body` is a `FormData` instance, do NOT set `Content-Type` (browser sets multipart boundary automatically). If `options.body` is a `URLSearchParams` instance (for form-encoded login), do NOT set `Content-Type` either (browser sets it to `application/x-www-form-urlencoded`). Otherwise set `Content-Type: application/json`
 - Read the JWT from `localStorage.getItem("token")` and attach `Authorization: Bearer <token>` header if present
 - Call `fetch(url, mergedOptions)`
 - If response status is `401`: remove token from localStorage, redirect to `/` via `window.location.href = "/"`, and throw an error
@@ -75,16 +75,15 @@ This is the central HTTP layer. Every API call goes through here.
 
 | Function                             | Method | Path                      | Body                                | Notes                                         |
 | ------------------------------------ | ------ | ------------------------- | ----------------------------------- | --------------------------------------------- |
-| `register(username, email, password)` | POST   | `/auth/register`          | JSON `{ username, email, password }` |                                               |
-| `login(username, password)`          | POST   | `/auth/login`             | JSON `{ username, password }`       |                                               |
-| `uploadFile(file)`                   | POST   | `/file/upload`            | `FormData` with field `file`        |                                               |
-| `getFileStatus(fileId)`              | GET    | `/file/status/{fileId}`   | —                                   |                                               |
-| `getFiles()`                         | GET    | `/file/files`             | —                                   |                                               |
-| `createConversation()`               | POST   | `/conversation/`          | —                                   |                                               |
-| `getConversations()`                 | GET    | `/conversation/`          | —                                   |                                               |
-| `getConversation(id)`                | GET    | `/conversation/{id}`      | —                                   |                                               |
-| `deleteConversation(id)`             | DELETE | `/conversation/{id}`      | —                                   |                                               |
-| `sendQuery(question, conversationId)` | POST   | `/query/`                 | JSON `{ question, conversation_id }` | `conversation_id` is optional — omit if null |
+| `register(email, password, fullName?)` | POST   | `/auth/register`          | JSON `{ email, password, full_name? }` |                                            |
+| `login(email, password)`             | POST   | `/auth/login`             | Form-encoded `username=<email>&password=<password>` | OAuth2 — `Content-Type: application/x-www-form-urlencoded` |
+| `uploadFile(file)`                   | POST   | `/files/upload`           | `FormData` with field `file`        |                                               |
+| `getFileStatus(fileId)`              | GET    | `/files/status/{fileId}`  | —                                   |                                               |
+| `getFiles()`                         | GET    | `/files`                  | —                                   |                                               |
+| `createConversation()`               | POST   | `/conversations`          | —                                   |                                               |
+| `getConversations()`                 | GET    | `/conversations`          | —                                   |                                               |
+| `getMessages(conversationId)`        | GET    | `/conversations/{id}/messages` | —                              |                                               |
+| `deleteConversation(id)`             | DELETE | `/conversations/{id}`     | —                                   |                                               |
 | `askStreaming(question, conversationId, callbacks, docIds?)` | POST | `/conversations/{id}/ask` | JSON `{ question, doc_ids? }` | SSE streaming — see below |
 
 ### `askStreaming` — SSE Streaming Chat
@@ -177,17 +176,17 @@ Create a React context that provides: `{ user, token, login, register, logout, l
 - If token exists, set it in state. Optionally decode the JWT payload (it's base64 — use `JSON.parse(atob(token.split('.')[1]))`) to extract user info like `sub` (username). Set `loading = false`
 - If no token, set `loading = false`
 
-### `login(username, password)` method
+### `login(email, password)` method
 
-- Call `api.login(username, password)`
+- Call `api.login(email, password)` (sends form-encoded `username=<email>&password=<password>` per OAuth2)
 - Store `access_token` in localStorage
 - Set token and user in state
 - Return success (let the caller handle redirect)
 
-### `register(username, email, password)` method
+### `register(email, password, fullName?)` method
 
-- Call `api.register(username, email, password)`
-- After success, automatically call `login(username, password)` so the user is logged in immediately
+- Call `api.register(email, password, fullName)`
+- After success, automatically call `login(email, password)` so the user is logged in immediately
 
 ### `logout()` method
 
@@ -256,7 +255,7 @@ Full-screen centered card with the app name as heading above the form.
 ### State
 
 - `mode` — `"login"` or `"register"` (toggle between forms)
-- `username`, `email`, `password` — form fields
+- `email`, `password`, `fullName` — form fields
 - `error` — string for displaying API errors
 - `submitting` — boolean for loading state
 
@@ -264,8 +263,8 @@ Full-screen centered card with the app name as heading above the form.
 
 - A card (white bg, rounded, shadow, `dark:bg-gray-800`) centered on the page, max-width ~400px
 - Two tabs or text links at the top: "Login" / "Register" — clicking toggles `mode` and clears `error`
-- **Login mode:** username + password fields
-- **Register mode:** username + email + password fields
+- **Login mode:** email + password fields
+- **Register mode:** email + password + full name (optional) fields
 - Submit button: blue (`bg-primary`), full width, shows "Signing in..." / "Creating account..." when `submitting`
 - Error message displayed in red text below the button
 - Fields: standard `<input>` with Tailwind classes — border, rounded, padding, focus ring in blue, `dark:bg-gray-700 dark:border-gray-600`
@@ -273,7 +272,7 @@ Full-screen centered card with the app name as heading above the form.
 ### On submit
 
 - Prevent default, set `submitting = true`, clear error
-- Call `auth.login()` or `auth.register()` from `useAuth()`
+- Call `auth.login(email, password)` or `auth.register(email, password, fullName)` from `useAuth()`
 - On success: `router.push("/chat")`
 - On error: set `error` to the caught message, set `submitting = false`
 
@@ -303,7 +302,7 @@ Full-screen centered card with the app name as heading above the form.
 ### Conversation selection handler (`selectConversation(id)`)
 
 - Set `activeConversationId = id`
-- Fetch messages via `api.getConversation(id)`, set `messages` from the response
+- Fetch messages via `api.getMessages(id)`, set `messages` from the response
 
 ### New chat handler
 

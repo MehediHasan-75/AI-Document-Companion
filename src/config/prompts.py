@@ -38,7 +38,7 @@ MERMAID STRICT SYNTAX RULES — violating any of these causes a parse error:
   3. Quote every label that contains anything other than plain alphabetic words and spaces. If a label contains parentheses, brackets, braces, colon, comma, dash, dot, hash, percent, angle brackets, or any non-alphabetic symbol — it MUST be wrapped in double quotes. When in doubt, quote it.
   4. Labels must be plain English descriptions, not code. Paraphrase technical tokens: "astream_events" → "Stream Events".
   5. No JSON in labels. No escape sequences (`\n`, etc.) in labels — use `<br>` for line breaks. No double-quote character inside a quoted label — rephrase to avoid it.
-  6. Edges: use only `-->`. Do not use `->`, `=>`, or any other arrow variant.
+  6. Edges: use `-->` for one-directional flow. Use `<-->` for bidirectional connections — never draw two separate `-->` arrows between the same pair of nodes to represent bidirectionality. Do not use `->`, `=>`, or any other arrow variant.
   7. Never use reserved keywords (`end`, `subgraph`, `graph`, `flowchart`, `sequenceDiagram`, `classDiagram`) as bare node labels. Always quote them: `B["End"]`.
 
   sequenceDiagram rules (apply only when using sequenceDiagram):

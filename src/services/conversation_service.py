@@ -123,16 +123,23 @@ class ConversationService:
             .order_by(Message.created_at.asc())
             .all()
         )
-        return [
-            {
+        result = []
+        for m in messages:
+            sources = m.sources or []
+            images = [
+                s["image_base64"]
+                for s in sources
+                if s.get("type") == "image" and s.get("image_base64")
+            ]
+            result.append({
                 "id": m.id,
                 "role": m.role.value,
                 "content": m.content,
-                "sources": m.sources,
+                "sources": sources,
+                "images": images,
                 "created_at": m.created_at.isoformat(),
-            }
-            for m in messages
-        ]
+            })
+        return result
 
 
 conversation_service = ConversationService()

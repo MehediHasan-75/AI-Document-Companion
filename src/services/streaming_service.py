@@ -117,13 +117,14 @@ async def stream_chat_response(
         if not full_response:
             full_response = f"Error: {error_msg}"
 
+    # Derive image list before persisting so sources are complete
+    images = [s["image_base64"] for s in sources if s.get("type") == "image" and s.get("image_base64")]
+
     if full_response:
         conversation_service.add_message(
             db, conversation_id, MessageRole.ASSISTANT, full_response,
             user_id, sources=sources,
         )
-
-    images = [s["image_base64"] for s in sources if s.get("image_base64")]
 
     yield _sse({
         "type": "complete",

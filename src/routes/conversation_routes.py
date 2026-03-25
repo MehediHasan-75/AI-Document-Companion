@@ -12,6 +12,7 @@ from src.schemas.conversation import (
     ConversationResponse,
     CreateConversationRequest,
     DeleteConversationResponse,
+    RenameConversationRequest,
 )
 from src.services.conversation_service import conversation_service
 from src.services.streaming_service import stream_chat_response
@@ -61,6 +62,27 @@ def get_messages(
     current_user: User = Depends(get_current_user),
 ):
     return conversation_service.get_messages(db, conversation_id, user_id=current_user.id)
+
+
+@router.patch(
+    "/{conversation_id}",
+    response_model=ConversationResponse,
+    summary="Rename a conversation",
+    responses={
+        401: {"description": "Invalid or expired token"},
+        404: {"description": "Conversation not found"},
+    },
+)
+def rename_conversation(
+    conversation_id: str,
+    payload: RenameConversationRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    conv = conversation_service.rename_conversation(
+        db, conversation_id, user_id=current_user.id, title=payload.title
+    )
+    return {"id": conv.id, "title": conv.title, "created_at": conv.created_at.isoformat()}
 
 
 @router.post(

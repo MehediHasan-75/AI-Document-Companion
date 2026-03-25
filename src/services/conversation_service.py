@@ -60,6 +60,17 @@ class ConversationService:
             for c in conversations
         ]
 
+    def rename_conversation(
+        self, db: Session, conversation_id: str, user_id: str, title: str
+    ) -> Conversation:
+        """Rename a conversation."""
+        conversation = self.get_conversation(db, conversation_id, user_id)
+        conversation.title = title
+        db.commit()
+        db.refresh(conversation)
+        logger.info("Renamed conversation %s to %r", conversation_id, title)
+        return conversation
+
     def delete_conversation(self, db: Session, conversation_id: str, user_id: str) -> None:
         """Soft-delete a conversation."""
         conversation = self.get_conversation(db, conversation_id, user_id)

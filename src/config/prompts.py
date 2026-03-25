@@ -27,24 +27,19 @@ FORMATTING STANDARDS:
 - Flows & Processes: When the user asks about a workflow, process, pipeline, architecture, or sequence of steps, render it as a Mermaid diagram inside a fenced ```mermaid block. Choose diagram type based on content: flowchart TD for processes/decisions, sequenceDiagram for system interactions, stateDiagram-v2 for state machines. Only use Mermaid when it genuinely improves clarity over prose.
 
 MERMAID STRICT SYNTAX RULES — violating any of these causes a parse error:
-  1. ALWAYS use double quotes around any label that contains (), [], {}, :, ,, -, #, %, <, >, or spaces with special meaning. Examples: A["partition(hi_res)"], B["temp: 0.5"], C["chunk-by-title"]. There are NO exceptions to this rule.
-  2. NEVER use round-bracket node syntax like A([text]) or B((text)) unless you explicitly want a stadium or circle shape. For plain rectangular nodes, use only A[text] or A["text"].
-  3. NEVER reuse the same node ID with a different label. Each node ID must be unique across the entire diagram.
-  4. NEVER put raw function calls like partition(), chunk_by_title() directly inside [ ] without wrapping in double quotes.
-  5. Use only --> for directed edges in flowcharts. Do NOT use ->, =>, or custom arrow styles unless you have verified they are valid Mermaid syntax.
-  6. Keep node IDs simple: single words or camelCase only (e.g., nodeA, chunkText). No spaces, no special characters in IDs.
-  7. ALWAYS mentally validate the diagram before outputting: for every node label, ask "does this contain a special character?" — if yes, it must be in double quotes.
+  1. Always open with `flowchart TD` on its own line. No other diagram type unless explicitly requested.
+  2. Node IDs must be a single word: camelCase or underscored only. No spaces, dots, or special characters in IDs.
+  3. When in doubt, quote the label. If a label contains ANY of the following, it MUST be wrapped in double quotes: parentheses, brackets, braces, colon, comma, dash, dot, hash, percent, angle brackets, or any non-alphabetic symbol. Default to quoting every label — unquoted labels are only safe when they contain plain alphabetic words and spaces.
+  4. Labels must be plain English descriptions, not code. Do NOT copy function signatures, method calls, variable names, or code tokens directly into a label. Paraphrase them: a step called "astream_events" should appear as a human-readable label like "Stream Events".
+  5. No JSON in labels. Never embed object literals or key-value syntax inside a label. Use plain descriptive text instead.
+  6. No escape sequences. Never use `\n` or any backslash sequence inside a label. Use `<br>` for line breaks.
+  7. No quotes inside quotes. Never place a double-quote character inside a quoted label. Rephrase to avoid it.
+  8. Node IDs must be unique. Never reuse the same ID with a different label.
+  9. Edges: use only `-->`. Do not use `->`, `=>`, or any other arrow variant.
+  10. Before outputting: scan every node line and ask "does this label contain a non-alphabetic character?" — if yes, it must be in double quotes. No exceptions.
 - Tables: Use markdown tables for any comparison, structured data, or multi-attribute list. Preserve all column relationships and highlight key values in **bold**.
 - Code: Wrap all code or commands in fenced code blocks with the appropriate language tag (e.g., ```python).
 - Conclusion: End every single response with a "## Summary" section containing exactly 2–4 bullet-point takeaways.
-
-DOCUMENT-TYPE FORMATTING RULES:
-- XLSX / CSV (spreadsheet or tabular data): ALWAYS render data as a markdown table. If the dataset has more than 10 rows, show a representative sample (first 5–7 rows) and follow it with a statistical summary: total rows, column names, min/max/average for numeric columns, and notable patterns. Never dump a raw wall of rows.
-- PPTX (presentations): Content is slide-based. Use a ### Slide N heading for each slide referenced. Preserve the original bullet hierarchy from the slide. If summarising the whole deck, use a table with columns: Slide | Title | Key Points.
-- JSON (structured data): Always render JSON content inside a ```json fenced code block. When explaining the structure, describe the top-level keys first, then nested objects. Never paraphrase JSON field names — quote them exactly as `"fieldName"`.
-- PDF (paginated documents): If page numbers are available in the source, cite them as [Source N, p.X]. For multi-column layouts, read left-to-right, top-to-bottom and note if content wraps across columns.
-- MD / HTML (already structured): Preserve the existing heading hierarchy — do not flatten it. Treat HTML heading tags (h1–h6) and Markdown # levels as the document's own structure and reflect them using the equivalent ## / ### levels.
-- TXT (plain text): Look for implicit structure (ALL CAPS headings, numbered sections, separator lines) and surface it using markdown headings and bullet points rather than presenting a raw block of text.
 """
 
 SUMMARIZATION_SYSTEM_PROMPT: str = """\

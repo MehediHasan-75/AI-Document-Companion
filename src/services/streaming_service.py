@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from sqlalchemy.orm import Session
@@ -20,6 +21,33 @@ from src.services.retrieval_service import get_multi_vector_retriever
 from src.services.vector_service import get_vectorstore
 
 logger = logging.getLogger(__name__)
+
+# Characters that break Mermaid parsing when unquoted inside node labels.
+_MERMAID_UNSAFE = re.compile(r'[.()\[\]{},:#%<>\\]')
+
+
+def _sanitize_mermaid(text: str) -> str:
+    """Wrap unsafe Mermaid node labels in double quotes.
+
+    Finds every ```mermaid block and auto-quotes any node label of the form
+    ID[label] where the label contains characters that break Mermaid parsing.
+    Already-quoted labels (ID["label"]) are left untouched.
+    """
+    def fix_block(block_match: re.Match) -> str:
+        block = block_match.group(0)
+
+        def quote_label(m: re.Match) -> str:
+            node_id, label = m.group(1), m.group(2)
+            if _MERMAID_UNSAFE.search(label):
+                label = label.replace('"', "'")  # avoid nested quotes
+                return f'{node_id}["{label}"]'
+            return m.group(0)
+
+        # Match unquoted rectangular labels: WORD_ID[label without existing quotes]
+        return re.sub(r'\b(\w+)\[([^"\]\[]+)\]', quote_label, block)
+
+    return re.sub(r'```mermaid\n.*?```', fix_block, text, flags=re.DOTALL)
+
 
 _STEP_LABELS = {
     "resolve_originals": "Resolving original content...",
@@ -116,6 +144,8 @@ async def stream_chat_response(
         yield _sse({"type": "error", "content": error_msg})
         if not full_response:
             full_response = f"Error: {error_msg}"
+
+    full_response = _sanitize_mermaid(full_response)
 
     # Derive image list before persisting so sources are complete
     images = [s["image_base64"] for s in sources if s.get("type") == "image" and s.get("image_base64")]

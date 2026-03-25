@@ -23,6 +23,10 @@ class ConversationResponse(BaseModel):
     created_at: str
 
 
+class RenameConversationRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200)
+
+
 class DeleteConversationResponse(BaseModel):
     message: str
     id: str

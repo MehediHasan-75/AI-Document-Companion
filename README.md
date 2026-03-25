@@ -98,6 +98,12 @@ The architecture is intentionally layered. Every design decision has a concrete 
 
 ## System Architecture
 
+### RAG Architecture Diagram
+
+![RAG Architecture](docs/rag-architecture.webp)
+
+### Component Overview
+
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                         CLIENT REQUEST                          │

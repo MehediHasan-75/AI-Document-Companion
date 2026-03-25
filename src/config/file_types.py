@@ -17,6 +17,7 @@ ALLOWED_CONTENT_TYPES: Final[frozenset[str]] = frozenset({
     "text/markdown",
     "text/x-markdown",
     "text/html",
+    "application/octet-stream",
 
     # Microsoft Word
     "application/msword",

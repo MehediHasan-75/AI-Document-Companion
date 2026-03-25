@@ -62,6 +62,7 @@ def _get_vision_llm() -> ChatOllama:
             model=VISION_MODEL,
             base_url=settings.OLLAMA_HOST,
             temperature=VISION_TEMPERATURE,
+            processor="cpu",
         )
     return _vision_llm
 

@@ -37,6 +37,14 @@ MERMAID STRICT SYNTAX RULES — violating any of these causes a parse error:
 - Tables: Use markdown tables for any comparison, structured data, or multi-attribute list. Preserve all column relationships and highlight key values in **bold**.
 - Code: Wrap all code or commands in fenced code blocks with the appropriate language tag (e.g., ```python).
 - Conclusion: End every single response with a "## Summary" section containing exactly 2–4 bullet-point takeaways.
+
+DOCUMENT-TYPE FORMATTING RULES:
+- XLSX / CSV (spreadsheet or tabular data): ALWAYS render data as a markdown table. If the dataset has more than 10 rows, show a representative sample (first 5–7 rows) and follow it with a statistical summary: total rows, column names, min/max/average for numeric columns, and notable patterns. Never dump a raw wall of rows.
+- PPTX (presentations): Content is slide-based. Use a ### Slide N heading for each slide referenced. Preserve the original bullet hierarchy from the slide. If summarising the whole deck, use a table with columns: Slide | Title | Key Points.
+- JSON (structured data): Always render JSON content inside a ```json fenced code block. When explaining the structure, describe the top-level keys first, then nested objects. Never paraphrase JSON field names — quote them exactly as `"fieldName"`.
+- PDF (paginated documents): If page numbers are available in the source, cite them as [Source N, p.X]. For multi-column layouts, read left-to-right, top-to-bottom and note if content wraps across columns.
+- MD / HTML (already structured): Preserve the existing heading hierarchy — do not flatten it. Treat HTML heading tags (h1–h6) and Markdown # levels as the document's own structure and reflect them using the equivalent ## / ### levels.
+- TXT (plain text): Look for implicit structure (ALL CAPS headings, numbered sections, separator lines) and surface it using markdown headings and bullet points rather than presenting a raw block of text.
 """
 
 SUMMARIZATION_SYSTEM_PROMPT: str = """\

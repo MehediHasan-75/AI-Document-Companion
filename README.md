@@ -36,13 +36,8 @@
 ---
 
 ## Demo
-
-> **TODO:** Replace with a screen recording or GIF of the SSE streaming response in action.
-> Recommended: record with [asciinema](https://asciinema.org/) or a screen capture tool, then embed here.
-
-```
-[demo.gif placeholder — upload a recording of /conversations/{id}/ask streaming tokens in the terminal or UI]
-```
+Watch the demo video below:
+[![AI Document Companion Demo](https://img.youtube.com/vi/zwQlIqZXOvk/0.jpg)](https://youtu.be/zwQlIqZXOvk)
 
 ---
 
